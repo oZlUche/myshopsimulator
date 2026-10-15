@@ -11,11 +11,14 @@ const TRAFFIC_SCALE := 0.12
 
 signal visitor_arrived(visitor: Dictionary)
 signal visitor_left(visitor: Dictionary)
+## 每个走过周遭范围的过路客（表现层画行人用）。stayed 表示是否被吸引停下。
+signal passerby(stayed: bool)
 
 var s: GameState
 var api: ActionAPI
 var x: float
-## 当前逗留的客人 [{customer, wanted_slot, wanted_index, state, wait}]
+## 当前逗留的客人 [{customer, item_id, state, wait}]
+## state: browsing 在看 → asking 在问价（等玩家理会）→ haggling 议价中 → left
 var visitors: Array = []
 var _spawn_acc := 0.0
 var _returning: Array[CustomerProfile] = []
@@ -56,11 +59,23 @@ func tick(dt: float) -> void:
 	if not _returning.is_empty() and s.rng.chance(dt / PERIOD_SECONDS * 3.0):
 		_consider(_returning.pop_back(), true)
 	for v in visitors.duplicate():
+		if v["state"] == "haggling":
+			continue
 		v["wait"] = float(v["wait"]) - dt
-		if v["state"] == "browsing" and v["wait"] <= 0.0:
-			v["state"] = "left"
-			visitors.erase(v)
-			visitor_left.emit(v)
+		if v["wait"] <= 0.0:
+			if v["state"] == "asking":
+				s.period_stats["ignored"] = int(s.period_stats.get("ignored", 0)) + 1
+			_leave(v)
+		elif v["state"] == "browsing" and s.rng.chance(v["customer"].intent * (1.0 - 0.5 * v["customer"].hesitation) * 0.04 * dt):
+			# 犹豫一会儿后开口问价
+			v["state"] = "asking"
+			v["wait"] = 15.0 + 45.0 * v["customer"].patience
+
+
+func _leave(v: Dictionary) -> void:
+	v["state"] = "left"
+	visitors.erase(v)
+	visitor_left.emit(v)
 
 
 func _passerby() -> void:
@@ -73,6 +88,7 @@ func _passerby() -> void:
 func _consider(c: CustomerProfile, is_returning: bool) -> void:
 	var best := _best_item_for(c)
 	if best.is_empty():
+		passerby.emit(false)
 		return
 	var shout := SkillSystem.shout_mods(s.player)
 	var sl: Slot = s.inventory.slots[best["slot_id"]]
@@ -81,11 +97,13 @@ func _consider(c: CustomerProfile, is_returning: bool) -> void:
 	if is_returning:
 		p = maxf(p, 0.7)
 	if not s.rng.chance(p):
+		passerby.emit(false)
 		return
+	passerby.emit(true)
 	s.period_stats["stayed"] = int(s.period_stats["stayed"]) + 1
 	var wants_to_ask := s.rng.chance(clampf(c.intent + float(shout["intent_add"]), 0.0, 1.0))
 	var v := {
-		"customer": c, "slot_id": best["slot_id"], "index": best["index"],
+		"customer": c, "item_id": best["item_id"],
 		"state": "asking" if wants_to_ask else "browsing",
 		"wait": 20.0 + 60.0 * c.patience,
 	}
@@ -102,33 +120,41 @@ func _best_item_for(c: CustomerProfile) -> Dictionary:
 			# 越靠上越容易被看到
 			var vis := 1.0 - 0.1 * sl.stack.count_above(i)
 			if best.is_empty() or m * vis > float(best["score"]):
-				best = {"slot_id": sl.id, "index": i, "match": m, "score": m * vis}
+				best = {"slot_id": sl.id, "index": i, "item_id": sl.stack.items[i].id, "match": m, "score": m * vis}
 	return best
 
 
-## 为客人开一个议价。
+## 客人看中的那份货现在在哪：{slot_id, index}；已不在摊位上则为空。
+func locate(item_id: String) -> Dictionary:
+	for sl in s.inventory.slots_of_type("StallTable"):
+		var idx := sl.stack.index_of(item_id)
+		if idx >= 0:
+			return {"slot_id": sl.id, "index": idx}
+	return {}
+
+
+## 为客人开一个议价。看中的货已经不在（卖掉 / 塌了 / 被挪走）时换一份，没有就返回 null。
 func start_haggle(v: Dictionary) -> HaggleState:
-	var sl: Slot = s.inventory.slots[v["slot_id"]]
-	if int(v["index"]) >= sl.stack.height():
-		return null
-	var sku_id: String = sl.stack.items[v["index"]].sku_id
+	var loc := locate(v["item_id"])
+	if loc.is_empty():
+		var best := _best_item_for(v["customer"])
+		if best.is_empty():
+			return null
+		v["item_id"] = best["item_id"]
+		loc = best
+	var sl: Slot = s.inventory.slots[loc["slot_id"]]
+	var sku_id: String = sl.stack.items[loc["index"]].sku_id
 	var asking := float(s.stall["prices"].get(sku_id, DataDB.sku(sku_id)["base_price"]))
+	v["state"] = "haggling"
 	return HaggleState.start(v["customer"], sku_id, asking, SkillSystem.haggle_mods(s.player))
 
 
-## 议价结束：成交则卖出，客人离开。
-func finish(v: Dictionary, h: HaggleState) -> Dictionary:
+## 议价结束：成交则从摊位取出那份货卖掉（下层货要过抽取结算），客人离开。
+func finish(v: Dictionary, h: HaggleState, pull_input: Dictionary = ActionAPI.CAREFUL_PULL) -> Dictionary:
 	var out := {"ok": false}
 	if h != null and h.result == "deal":
-		var sl: Slot = s.inventory.slots[v["slot_id"]]
-		var idx := int(v["index"])
-		if idx < sl.stack.height() and sl.stack.items[idx].sku_id == h.sku_id:
-			out = api.sell(v["slot_id"], idx, h.final_price, h.customer, h.reserve)
-		# 同一槽位其他客人看中的下标会因抽出而变化
-		for other in visitors:
-			if other != v and other["slot_id"] == v["slot_id"] and int(other["index"]) >= idx:
-				other["index"] = maxi(0, int(other["index"]) - 1)
-	v["state"] = "left"
-	visitors.erase(v)
-	visitor_left.emit(v)
+		var loc := locate(v["item_id"])
+		if not loc.is_empty():
+			out = api.sell(loc["slot_id"], loc["index"], h.final_price, h.customer, h.reserve, pull_input)
+	_leave(v)
 	return out

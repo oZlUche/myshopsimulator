@@ -32,8 +32,9 @@ static func simulate_stall_period(s: GameState, stall_x: float = -1.0, step: flo
 				if h == null:
 					session.finish(v, null)
 					continue
-				var sl: Slot = s.inventory.slots[v["slot_id"]]
-				var cost := float(sl.stack.items[v["index"]].provenance.get("unit_cost", 0.0))
+				var loc := session.locate(v["item_id"])
+				var sl: Slot = s.inventory.slots[loc["slot_id"]]
+				var cost := float(sl.stack.items[loc["index"]].provenance.get("unit_cost", 0.0))
 				run(h, cost, s.rng)
 				session.finish(v, h)
 	var lost := ActionAPI.new(s).pack_up()

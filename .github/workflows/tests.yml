@@ -21,3 +21,8 @@ jobs:
         run: ./godot --headless --path . --import || true
       - name: Run tests (core + save fixtures)
         run: ./godot --headless --path . --script res://tests/run_tests.gd
+      - name: UI smoke test (scripted playthrough of one period)
+        run: |
+          ./godot --headless --path . --script res://tests/tools/ui_smoke.gd 2>&1 | tee ui.log
+          grep -q "UI_SMOKE PASS" ui.log
+          ! grep -q "SCRIPT ERROR" ui.log

@@ -104,3 +104,15 @@ func test_pack_up_returns_goods_to_bag() -> void:
 	assert_eq(lost, 0)
 	assert_eq(s.inventory.count_items("", "StallTable"), 0)
 	assert_eq(s.inventory.count_items("player", "Bag"), 2)
+
+
+func test_buy_equipment_adds_slots() -> void:
+	var s := _state()
+	var api := ActionAPI.new(s)
+	var before := s.inventory.slots_of_type("StallTable").size()
+	var r := api.buy_equipment("stall_board_small", "stall")
+	assert_true(r["ok"], str(r))
+	assert_eq(s.inventory.slots_of_type("StallTable").size(), before + 4)
+	assert_near(s.player.cash, 500.0 - 120.0)
+	s.player.cash = 0.0
+	assert_true(not api.buy_equipment("bag_extra", "player")["ok"], "没钱买不了")

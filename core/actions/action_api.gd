@@ -225,3 +225,21 @@ func pack_up() -> int:
 				lost += 1
 				s.knowledge.add_ledger(s.clock.period, "discard", 0.0, "行囊装不下：" + DataDB.sku_display_name(it.sku_id))
 	return lost
+
+
+## 购置设备（01 §4.9）：扣现金，向场所注入槽位。摆摊设备只能在摆摊阶段买。
+func buy_equipment(def_id: String, location_id: String) -> Dictionary:
+	var def: Dictionary = DataDB.equipment().get(def_id, {})
+	if def.is_empty():
+		return {"ok": false, "reason": "没有这种设备"}
+	var phase: String = def.get("phase", "any")
+	if phase != "any" and phase != s.player.phase:
+		return {"ok": false, "reason": "当前阶段用不上"}
+	var price := float(def.get("price", 0.0))
+	if price > s.player.cash + 0.0001:
+		return {"ok": false, "reason": "现金不够"}
+	s.player.cash -= price
+	var eid := s.inventory.install_equipment(def_id, location_id)
+	s.knowledge.add_ledger(s.clock.period, "equipment", -price, def.get("name", def_id))
+	s.bus.emit("equipment_bought", {"def_id": def_id, "equipment_id": eid})
+	return {"ok": true, "equipment_id": eid}
