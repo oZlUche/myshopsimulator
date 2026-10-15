@@ -1,0 +1,36 @@
+{
+	"_comment": "围巾 SKU 由 图案 × 颜色 × 材质 组合生成，ID 形如 scarf_<pattern>_<color>_<material>。ID 是稳定字符串，改顺序不影响存档。",
+	"colors": {
+		"red": {"name": "红", "rgb": "#c0392b"},
+		"navy": {"name": "藏青", "rgb": "#22315a"},
+		"beige": {"name": "米", "rgb": "#e6d5b8"},
+		"black": {"name": "黑", "rgb": "#1e1e1e"},
+		"grey": {"name": "灰", "rgb": "#8a8a8a"},
+		"purple": {"name": "紫", "rgb": "#7d3c98"},
+		"green": {"name": "墨绿", "rgb": "#1e5631"},
+		"camel": {"name": "驼", "rgb": "#b5835a"}
+	},
+	"patterns": {
+		"solid": {"name": "纯色", "price_mult": 1.0, "confusable": false},
+		"plaid": {"name": "格纹", "price_mult": 1.2, "confusable": true},
+		"stripe": {"name": "条纹", "price_mult": 1.1, "confusable": true},
+		"floral": {"name": "碎花", "price_mult": 1.25, "confusable": true},
+		"dot": {"name": "波点", "price_mult": 1.1, "confusable": true}
+	},
+	"materials": {
+		"cotton_linen": {"name": "棉麻", "base_cost": 18, "weight": 1.0},
+		"silk": {"name": "真丝", "base_cost": 45, "weight": 0.6},
+		"ice_silk": {"name": "冰丝", "base_cost": 22, "weight": 0.5},
+		"chiffon": {"name": "薄纱", "base_cost": 15, "weight": 0.4},
+		"wool": {"name": "羊毛", "base_cost": 40, "weight": 1.6},
+		"cashmere": {"name": "羊绒", "base_cost": 90, "weight": 1.4},
+		"knit": {"name": "加厚针织", "base_cost": 30, "weight": 2.0}
+	},
+	"retail_markup": 2.2,
+	"season_material_baseline": {
+		"spring": {"silk": 0.35, "cotton_linen": 0.35, "chiffon": 0.15, "ice_silk": 0.05, "wool": 0.05, "cashmere": 0.03, "knit": 0.02},
+		"summer": {"ice_silk": 0.4, "chiffon": 0.35, "silk": 0.15, "cotton_linen": 0.08, "wool": 0.01, "cashmere": 0.005, "knit": 0.005},
+		"autumn": {"wool": 0.35, "cashmere": 0.3, "cotton_linen": 0.12, "silk": 0.08, "knit": 0.1, "chiffon": 0.03, "ice_silk": 0.02},
+		"winter": {"cashmere": 0.35, "knit": 0.35, "wool": 0.2, "cotton_linen": 0.04, "silk": 0.03, "chiffon": 0.02, "ice_silk": 0.01}
+	}
+}

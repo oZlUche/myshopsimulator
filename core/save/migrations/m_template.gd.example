@@ -1,0 +1,9 @@
+extends RefCounted
+## 模板：复制为 m_000N_to_000M.gd，并在 migrations.gd 的 REGISTRY 里登记 N。
+## 只做纯字典变换；不要引用任何游戏类（类以后会改，迁移脚本必须永远能跑）。
+
+
+func migrate(d: Dictionary) -> Dictionary:
+	# 例：给玩家加一个新字段并给默认值
+	# d["player"]["stamina"] = d["player"].get("stamina", 100.0)
+	return d

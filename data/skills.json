@@ -1,0 +1,20 @@
+{
+	"_comment": "技能表（02 文档）。xp_costs[i] 为第 i+1 级阈值；phase_cap 为阶段门（02 §7.1）；requires 为前置（02 §7.2），键为等级。",
+	"shout": {"name": "吆喝", "phases": ["stall"], "xp_costs": [60, 120, 200, 320, 480], "phase_cap": {"stall": 5, "shop": 0}},
+	"eloquence": {"name": "口才", "xp_costs": [80, 150, 240, 360, 500, 700], "phase_cap": {"stall": 3, "shop": 6},
+		"requires": {"4": [{"skill": "customer_observation", "level": 1}], "6": [{"skill": "customer_observation", "level": 5}]}},
+	"customer_observation": {"name": "客人观察", "xp_costs": [80, 160, 260, 400, 600], "phase_cap": {"stall": 2, "shop": 5}},
+	"aesthetics": {"name": "审美积累", "xp_costs": [100, 180, 280, 400, 550, 750, 1200], "phase_cap": {"stall": 2, "shop": 7}},
+	"memory": {"name": "强化记忆", "xp_costs": [50, 100, 180, 280, 400, 600], "phase_cap": {"stall": 2, "shop": 6}},
+	"math": {"name": "数学能手", "xp_costs": [60, 150, 260, 300, 450, 600], "phase_cap": {"stall": 1, "shop": 6},
+		"requires": {
+			"2": [{"flag": "shop_opened"}],
+			"3": [{"any": [{"skill": "aesthetics", "level": 1}, {"skill": "customer_observation", "level": 1}]}],
+			"5": [{"flag": "shop_opened"}],
+			"6": [{"any": [{"skill": "aesthetics", "level": 1}, {"skill": "customer_observation", "level": 1}]}]
+		}},
+	"employee_observation": {"name": "员工观察", "xp_costs": [100, 180, 280, 400, 550, 750], "phase_cap": {"stall": 0, "shop": 6},
+		"requires": {"1": [{"flag": "has_employee"}]}},
+	"driving": {"name": "驾驶", "xp_costs": [80, 150, 240, 360, 500, 700], "phase_cap": {"stall": 0, "shop": 6},
+		"requires": {"1": [{"flag": "has_vehicle"}]}}
+}

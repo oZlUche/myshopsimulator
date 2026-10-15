@@ -1,0 +1,651 @@
+{
+	"clock": {
+		"period": 2,
+		"time_of_period": 0
+	},
+	"customers": {
+		"next_id": 689,
+		"regulars": {
+			"cu_000030": {
+				"budget_mult": 1.11519069674406,
+				"careless": 0.134299665689468,
+				"haggle_strategy": "fake_leave",
+				"hesitation": 0.0150234019383788,
+				"id": "cu_000030",
+				"intent": 0.921363115310669,
+				"is_regular": true,
+				"kind": "retail",
+				"kindness": 0.204557731747627,
+				"loyalty_base": 0.662853956222534,
+				"patience": 0.51043438911438,
+				"preference": {
+					"color": "grey",
+					"material": "cashmere",
+					"pattern": "floral"
+				},
+				"visits": 1
+			},
+			"cu_000039": {
+				"budget_mult": 0.986389925191823,
+				"careless": 0.159686699509621,
+				"haggle_strategy": "fake_leave",
+				"hesitation": 0.60901153087616,
+				"id": "cu_000039",
+				"intent": 0.361980229616165,
+				"is_regular": true,
+				"kind": "retail",
+				"kindness": 0.935342490673065,
+				"loyalty_base": 0.371791958808899,
+				"patience": 0.719192922115326,
+				"preference": {
+					"color": "black",
+					"material": "ice_silk",
+					"pattern": "plaid"
+				},
+				"visits": 1
+			},
+			"cu_000042": {
+				"budget_mult": 1.35305162122603,
+				"careless": 0.527285158634186,
+				"haggle_strategy": "fake_leave",
+				"hesitation": 0.121905714273453,
+				"id": "cu_000042",
+				"intent": 0.63522857427597,
+				"is_regular": true,
+				"kind": "retail",
+				"kindness": 0.796948075294495,
+				"loyalty_base": 0.494970858097076,
+				"patience": 0.534410715103149,
+				"preference": {
+					"color": "camel",
+					"material": "wool",
+					"pattern": "plaid"
+				},
+				"visits": 1
+			},
+			"cu_000084": {
+				"budget_mult": 1.18166994890719,
+				"careless": 0.3786641061306,
+				"haggle_strategy": "direct_discount",
+				"hesitation": 0.602991282939911,
+				"id": "cu_000084",
+				"intent": 0.481944471597672,
+				"is_regular": true,
+				"kind": "retail",
+				"kindness": 0.678292155265808,
+				"loyalty_base": 0.607178688049316,
+				"patience": 0.567987442016602,
+				"preference": {
+					"color": "black",
+					"material": "cotton_linen",
+					"pattern": "solid"
+				},
+				"visits": 1
+			},
+			"cu_000192": {
+				"budget_mult": 1.33669180588225,
+				"careless": 0.400271207094193,
+				"haggle_strategy": "fake_leave",
+				"hesitation": 0.42785182595253,
+				"id": "cu_000192",
+				"intent": 0.494604110717773,
+				"is_regular": true,
+				"kind": "retail",
+				"kindness": 0.0432230159640312,
+				"loyalty_base": 0.487717926502228,
+				"patience": 0.731915831565857,
+				"preference": {
+					"color": "green",
+					"material": "cotton_linen",
+					"pattern": "solid"
+				},
+				"visits": 1
+			},
+			"cu_000392": {
+				"budget_mult": 1.10999946946321,
+				"careless": 0.332182794809341,
+				"haggle_strategy": "direct_discount",
+				"hesitation": 0.172997623682022,
+				"id": "cu_000392",
+				"intent": 0.585656762123108,
+				"is_regular": true,
+				"kind": "retail",
+				"kindness": 0.409633368253708,
+				"loyalty_base": 0.474781066179276,
+				"patience": 0.78450471162796,
+				"preference": {
+					"color": "green",
+					"material": "silk",
+					"pattern": "dot"
+				},
+				"visits": 1
+			},
+			"cu_000465": {
+				"budget_mult": 0.994198740799457,
+				"careless": 0.149110376834869,
+				"haggle_strategy": "direct_discount",
+				"hesitation": 0.386023074388504,
+				"id": "cu_000465",
+				"intent": 0.715076744556427,
+				"is_regular": true,
+				"kind": "retail",
+				"kindness": 0.721447050571442,
+				"loyalty_base": 0.720668911933899,
+				"patience": 0.76982855796814,
+				"preference": {
+					"color": "grey",
+					"material": "cotton_linen",
+					"pattern": "dot"
+				},
+				"visits": 1
+			},
+			"cu_000508": {
+				"budget_mult": 1.10365654249188,
+				"careless": 0.202483370900154,
+				"haggle_strategy": "tug_of_war",
+				"hesitation": 0.0576344095170498,
+				"id": "cu_000508",
+				"intent": 0.775456130504608,
+				"is_regular": true,
+				"kind": "retail",
+				"kindness": 0.962523400783539,
+				"loyalty_base": 0.0776210501790047,
+				"patience": 0.801685273647308,
+				"preference": {
+					"color": "red",
+					"material": "cotton_linen",
+					"pattern": "floral"
+				},
+				"visits": 1
+			}
+		},
+		"return_probability": {
+			"cu_000030": 0.728774736728067,
+			"cu_000039": 0.415572882507791,
+			"cu_000042": 0.569243418831153,
+			"cu_000084": 0.617900609669947,
+			"cu_000192": 0.624966005446898,
+			"cu_000392": 0.591781066179276,
+			"cu_000465": 0.795885376184054,
+			"cu_000508": 0.151769800179005
+		}
+	},
+	"economy": {
+		"base": {
+			"consumption_level": 1,
+			"loan_rate_base": 0.05,
+			"material_bias": {
+
+			},
+			"wholesale_credit_risk": 0.1
+		},
+		"base_delta_history": [],
+		"continuous_gain": 0.5,
+		"lambda": 0.88,
+		"observations": [
+			{
+				"price_ratio": -0.12833667877565,
+				"sales": 8,
+				"traffic": 688
+			}
+		]
+	},
+	"events": {
+
+	},
+	"flags": {
+		"employee_embezzlement": false,
+		"manual_checkout": false,
+		"quality": false,
+		"quality.flatness": false,
+		"quality.misdye": false,
+		"quality.misweave": false,
+		"quality.mold": false,
+		"wholesale_late_payment": false
+	},
+	"game_version": "0.0.1",
+	"inventory": {
+		"equipment": {
+			"eq_0001": {
+				"def_id": "bag_basic",
+				"location_id": "player",
+				"slot_ids": [
+					"sl_0001",
+					"sl_0002"
+				]
+			},
+			"eq_0002": {
+				"def_id": "stall_cloth",
+				"location_id": "stall",
+				"slot_ids": [
+					"sl_0003",
+					"sl_0004",
+					"sl_0005"
+				]
+			}
+		},
+		"locations": {
+			"player": {
+				"area_m2": 0,
+				"humidity": 0.5,
+				"id": "player",
+				"rent_per_m2": 0,
+				"type": "Carry"
+			},
+			"stall": {
+				"area_m2": 2,
+				"humidity": 0.5,
+				"id": "stall",
+				"rent_per_m2": 0,
+				"type": "Stall"
+			}
+		},
+		"next_equip": 3,
+		"next_item": 13,
+		"next_slot": 6,
+		"slots": {
+			"sl_0001": {
+				"access_cost": 2,
+				"display_score": 0,
+				"equipment_id": "eq_0001",
+				"grid_pos": [
+					0,
+					0
+				],
+				"id": "sl_0001",
+				"location_id": "player",
+				"stack": {
+					"collapsed_pile": [],
+					"disorder": 0,
+					"displaced": false,
+					"items": [
+						{
+							"id": "it_000002",
+							"provenance": {
+								"bought_period": 1,
+								"source": "local_shop",
+								"unit_cost": 25.5
+							},
+							"quality": null,
+							"sku_id": "scarf_dot_green_cotton_linen"
+						}
+					],
+					"max_height": 8
+				},
+				"type": "Bag"
+			},
+			"sl_0002": {
+				"access_cost": 2,
+				"display_score": 0,
+				"equipment_id": "eq_0001",
+				"grid_pos": [
+					1,
+					0
+				],
+				"id": "sl_0002",
+				"location_id": "player",
+				"stack": {
+					"collapsed_pile": [],
+					"disorder": 0,
+					"displaced": false,
+					"items": [
+						{
+							"id": "it_000009",
+							"provenance": {
+								"bought_period": 1,
+								"source": "local_shop",
+								"unit_cost": 32.5
+							},
+							"quality": null,
+							"sku_id": "scarf_plaid_green_ice_silk"
+						},
+						{
+							"id": "it_000010",
+							"provenance": {
+								"bought_period": 1,
+								"source": "local_shop",
+								"unit_cost": 17.5
+							},
+							"quality": null,
+							"sku_id": "scarf_solid_grey_chiffon"
+						},
+						{
+							"id": "it_000011",
+							"provenance": {
+								"bought_period": 1,
+								"source": "local_shop",
+								"unit_cost": 17.5
+							},
+							"quality": null,
+							"sku_id": "scarf_solid_grey_chiffon"
+						}
+					],
+					"max_height": 8
+				},
+				"type": "Bag"
+			},
+			"sl_0003": {
+				"access_cost": 1,
+				"display_score": 0.6,
+				"equipment_id": "eq_0002",
+				"grid_pos": [
+					0,
+					0
+				],
+				"id": "sl_0003",
+				"location_id": "stall",
+				"stack": {
+					"collapsed_pile": [],
+					"disorder": 0,
+					"displaced": false,
+					"items": [],
+					"max_height": 3
+				},
+				"type": "StallTable"
+			},
+			"sl_0004": {
+				"access_cost": 1,
+				"display_score": 0.6,
+				"equipment_id": "eq_0002",
+				"grid_pos": [
+					1,
+					0
+				],
+				"id": "sl_0004",
+				"location_id": "stall",
+				"stack": {
+					"collapsed_pile": [],
+					"disorder": 0,
+					"displaced": false,
+					"items": [],
+					"max_height": 3
+				},
+				"type": "StallTable"
+			},
+			"sl_0005": {
+				"access_cost": 1,
+				"display_score": 0.6,
+				"equipment_id": "eq_0002",
+				"grid_pos": [
+					2,
+					0
+				],
+				"id": "sl_0005",
+				"location_id": "stall",
+				"stack": {
+					"collapsed_pile": [],
+					"disorder": 0,
+					"displaced": false,
+					"items": [],
+					"max_height": 3
+				},
+				"type": "StallTable"
+			}
+		}
+	},
+	"knowledge": {
+		"labels": {
+
+		},
+		"ledger": [
+			{
+				"amount": -76.5,
+				"kind": "purchase",
+				"note": "墨绿波点棉麻围巾 ×3 @25.5",
+				"period": 1
+			},
+			{
+				"amount": -72,
+				"kind": "purchase",
+				"note": "灰波点棉麻围巾 ×3 @24.0",
+				"period": 1
+			},
+			{
+				"amount": -97.5,
+				"kind": "purchase",
+				"note": "墨绿格纹冰丝围巾 ×3 @32.5",
+				"period": 1
+			},
+			{
+				"amount": -52.5,
+				"kind": "purchase",
+				"note": "灰纯色薄纱围巾 ×3 @17.5",
+				"period": 1
+			},
+			{
+				"amount": 28.2374043870452,
+				"kind": "sale",
+				"note": "灰纯色薄纱围巾",
+				"period": 1
+			},
+			{
+				"amount": 48.262814293101,
+				"kind": "sale",
+				"note": "墨绿格纹冰丝围巾",
+				"period": 1
+			},
+			{
+				"amount": 50.1966360878028,
+				"kind": "sale",
+				"note": "墨绿格纹冰丝围巾",
+				"period": 1
+			},
+			{
+				"amount": 37.2769836004568,
+				"kind": "sale",
+				"note": "灰波点棉麻围巾",
+				"period": 1
+			},
+			{
+				"amount": 44,
+				"kind": "sale",
+				"note": "墨绿波点棉麻围巾",
+				"period": 1
+			},
+			{
+				"amount": 38.1366957721351,
+				"kind": "sale",
+				"note": "墨绿波点棉麻围巾",
+				"period": 1
+			},
+			{
+				"amount": 44,
+				"kind": "sale",
+				"note": "灰波点棉麻围巾",
+				"period": 1
+			},
+			{
+				"amount": 31.0685610312898,
+				"kind": "sale",
+				"note": "灰波点棉麻围巾",
+				"period": 1
+			}
+		],
+		"perceived": {
+
+		},
+		"recent_slots": [],
+		"trend_hints": []
+	},
+	"meta": {
+		"created_with": "0.0.1",
+		"seed": "2026"
+	},
+	"period_stats": {
+		"collapses": 0,
+		"cost_of_goods": 0,
+		"price_ratio_sum": 0,
+		"purchases": 0,
+		"revenue": 0,
+		"sales": 0,
+		"stayed": 0,
+		"traffic": 0,
+		"xp_earned": 0
+	},
+	"player": {
+		"available": true,
+		"cash": 522.679095171831,
+		"loans": [],
+		"phase": "stall",
+		"reputation": null,
+		"shop_opened_period": null,
+		"skills": {
+
+		},
+		"xp_pool": 60.0589547585915
+	},
+	"rng": {
+		"seed": "2026",
+		"state": "-5526574631993412759"
+	},
+	"schema_version": 1,
+	"stall": {
+		"prices": {
+			"scarf_dot_camel_chiffon": 36,
+			"scarf_dot_green_cotton_linen": 44,
+			"scarf_dot_green_silk": 109,
+			"scarf_dot_grey_cotton_linen": 44,
+			"scarf_dot_purple_cotton_linen": 44,
+			"scarf_floral_camel_silk": 124,
+			"scarf_floral_green_silk": 124,
+			"scarf_floral_purple_silk": 124,
+			"scarf_plaid_camel_silk": 119,
+			"scarf_plaid_green_chiffon": 40,
+			"scarf_plaid_green_ice_silk": 58,
+			"scarf_plaid_green_silk": 119,
+			"scarf_plaid_grey_cotton_linen": 48,
+			"scarf_solid_beige_silk": 99,
+			"scarf_solid_grey_chiffon": 33,
+			"scarf_stripe_beige_silk": 109,
+			"scarf_stripe_black_silk": 109,
+			"scarf_stripe_navy_silk": 109,
+			"scarf_stripe_purple_silk": 109
+		},
+		"x": null
+	},
+	"street": {
+		"base_density": 0.15,
+		"hotspots": [
+			{
+				"peak": 0.985650956630707,
+				"sigma": 5.16984844207764,
+				"x": 44.4644393920898
+			},
+			{
+				"peak": 0.87826943397522,
+				"sigma": 8.03015899658203,
+				"x": 34.5334663391113
+			}
+		],
+		"length": 60,
+		"vendors": [
+			{
+				"id": "vendor_0",
+				"radius": 3.34372711181641,
+				"x": 37.510968208313
+			},
+			{
+				"id": "vendor_1",
+				"radius": 2.9700014591217,
+				"x": 43.0328207015991
+			},
+			{
+				"id": "vendor_2",
+				"radius": 2.61187434196472,
+				"x": 40.5077602863312
+			},
+			{
+				"id": "vendor_3",
+				"radius": 3.49373579025269,
+				"x": 37.6430234909058
+			},
+			{
+				"id": "vendor_4",
+				"radius": 2.33842658996582,
+				"x": 39.9919333457947
+			}
+		]
+	},
+	"supplier_catalog": [
+		{
+			"sku_id": "scarf_dot_camel_chiffon",
+			"stock": 9,
+			"unit_price": 18
+		},
+		{
+			"sku_id": "scarf_dot_green_cotton_linen",
+			"stock": 4,
+			"unit_price": 25.5
+		},
+		{
+			"sku_id": "scarf_dot_green_silk",
+			"stock": 11,
+			"unit_price": 61
+		},
+		{
+			"sku_id": "scarf_dot_purple_cotton_linen",
+			"stock": 7,
+			"unit_price": 22.5
+		},
+		{
+			"sku_id": "scarf_floral_green_silk",
+			"stock": 6,
+			"unit_price": 69.5
+		},
+		{
+			"sku_id": "scarf_plaid_camel_silk",
+			"stock": 8,
+			"unit_price": 68.5
+		},
+		{
+			"sku_id": "scarf_plaid_green_chiffon",
+			"stock": 6,
+			"unit_price": 20.5
+		},
+		{
+			"sku_id": "scarf_plaid_green_silk",
+			"stock": 12,
+			"unit_price": 68
+		},
+		{
+			"sku_id": "scarf_stripe_beige_silk",
+			"stock": 6,
+			"unit_price": 59
+		},
+		{
+			"sku_id": "scarf_stripe_purple_silk",
+			"stock": 4,
+			"unit_price": 55.5
+		}
+	],
+	"trend": {
+		"color": {
+			"beige": 1.23832236401063,
+			"black": 0.965771785599892,
+			"camel": 0.608390950200459,
+			"green": 0.929756898990148,
+			"grey": 1.13965463962945,
+			"navy": 1.04715942238228,
+			"purple": 1.0232726877788,
+			"red": 1.18090247805713
+		},
+		"drift_sigma": 0.08,
+		"jump_schedule_p": 0.3,
+		"pattern": {
+			"dot": 1.31000302681739,
+			"floral": 0.946102328844299,
+			"plaid": 0.873994407243315,
+			"solid": 1.63208084561694,
+			"stripe": 0.654997661937165
+		},
+		"scheduled_jumps": [
+			{
+				"boost": 1.11488842964172,
+				"dim": "pattern",
+				"duration": 7,
+				"key": "dot",
+				"start_period": 5
+			}
+		]
+	}
+}
