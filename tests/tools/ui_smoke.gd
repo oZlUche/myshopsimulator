@@ -8,6 +8,28 @@ func shot(name):
 	var dir := OS.get_environment("SHOTS")
 	if dir != "" and DisplayServer.get_name() != "headless":
 		root.get_texture().get_image().save_png("%s/%s.png" % [dir, name])
+## 用好手法（按角落、斜向约 40°、先慢后快）把当前小游戏里的货拉出来。
+func good_pull(st, take_shot := false):
+	var mg = st._minigame
+	mg.set_process(false)  # 测试直接喂轨迹，不读真实鼠标
+	for i in 3: await process_frame
+	var tr = mg._target_rect()
+	var press = InputEventMouseButton.new()
+	press.button_index = MOUSE_BUTTON_LEFT
+	press.pressed = true
+	press.position = tr.position + Vector2(4, 3)
+	mg._gui_input(press)
+	var p = press.position
+	var speeds = [60, 80, 100, 140, 200, 280, 380, 480, 560, 600]
+	var k = 0
+	while st._minigame != null and k < 200:
+		p += Vector2(-1, -0.84).normalized() * speeds[mini(k, speeds.size() - 1)] * 0.05
+		mg._elapsed += 0.05
+		mg.drag_step(p, 0.05)
+		if k == 6 and take_shot:
+			await shot("3b_pull_minigame")
+		k += 1
+
 func scene():
 	return current_scene
 func _init() -> void:
@@ -41,6 +63,15 @@ func _init() -> void:
 				st._selected = {"slot_id": b.id, "index": b.stack.height()-1}
 				st._on_slot(t.id)
 	st._on_peek(s.inventory.slots_of_type("StallTable")[0].id, 0)
+	# 抽取小游戏：从第 1 格最底下抽一份放到第 3 格
+	var tables = s.inventory.slots_of_type("StallTable")
+	var before = tables[0].stack.height()
+	st._selected = {"slot_id": tables[0].id, "index": 0}
+	st._on_slot(tables[2].id)
+	assert(st._minigame != null, "从堆底抽货应弹出小游戏")
+	await good_pull(st, true)
+	assert(st._minigame == null, "好手法应能把货拉出来")
+	assert(tables[0].stack.height() + tables[0].stack.collapsed_pile.size() == before - 1)
 	st._on_main_button()
 	var guard = 0
 	while guard < 3000:
@@ -58,6 +89,8 @@ func _init() -> void:
 	st._haggle.accept_customer_offer()
 	st._refresh_haggle()
 	st._end_haggle()
+	if st._minigame != null:
+		await good_pull(st)
 	for i in 600: st._process(1.0)
 	await shot("6_stall_later")
 	st._on_main_button()

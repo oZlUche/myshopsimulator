@@ -116,3 +116,28 @@ func test_buy_equipment_adds_slots() -> void:
 	assert_near(s.player.cash, 500.0 - 120.0)
 	s.player.cash = 0.0
 	assert_true(not api.buy_equipment("bag_extra", "player")["ok"], "没钱买不了")
+
+
+func _drag(dir: Vector2, speeds: Array) -> Array:
+	var out: Array = []
+	var p := Vector2(100, 300)
+	var t := 0.0
+	out.append({"t": t, "pos": p})
+	for v in speeds:
+		t += 0.05
+		p += dir.normalized() * float(v) * 0.05
+		out.append({"t": t, "pos": p})
+	return out
+
+
+func test_drag_good_technique_is_low_deviation() -> void:
+	# 从角落斜向 40° 拉，先慢后快
+	var speeds := [60, 80, 100, 140, 200, 280, 380, 480, 560, 600]
+	var good := PullPhysics.input_from_drag(_drag(Vector2(1, -0.84), speeds), "corner")
+	assert_true(absf(float(good["angle_deg"]) - 40.0) < 1.0, str(good))
+	var d_good := PullPhysics.deviation_from_input(good)
+	# 从中间水平猛拽
+	var bad := PullPhysics.input_from_drag(_drag(Vector2(1, 0), [900, 900, 300, 1200, 900, 900]), "center")
+	var d_bad := PullPhysics.deviation_from_input(bad)
+	assert_true(d_good < 0.3, "好手法偏差应小：%f %s" % [d_good, str(good)])
+	assert_true(d_bad > 2.0, "坏手法偏差应大：%f %s" % [d_bad, str(bad)])
