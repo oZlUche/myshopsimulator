@@ -1,0 +1,227 @@
+class_name ActionAPI
+extends RefCounted
+## 玩家与员工 AI 共用的动作接口（01 §2.3、03 §6）。所有对真相层的改动都从这里走，
+## 并同步写认知层（账本、强化记忆、翻看结果）。actor 目前只有 "player"，员工阶段沿用同一接口。
+
+## 只有展示类槽位有货堆物理；行囊是软包，不会塌。
+const PHYSICS_SLOT_TYPES := ["StallTable", "ShopDisplay", "ShopBackroom", "WarehouseShelf"]
+## 玩家规范操作时的默认抽取输入（规划阶段 / 自动模拟用）
+const CAREFUL_PULL := {"angle_deg": 37.5, "point": "corner", "early_speed": 0.2, "jerk": 0.1}
+
+var s: GameState
+
+
+func _init(state: GameState) -> void:
+	s = state
+
+
+func _slot(slot_id: String) -> Slot:
+	return s.inventory.slots.get(slot_id)
+
+
+func _touch(slot: Slot) -> void:
+	s.knowledge.touch_slot(slot, SkillSystem.memory_slots(s.player), s.clock.period)
+
+
+func _xp(amount: float) -> void:
+	s.player.xp_pool += amount
+	s.period_stats["xp_earned"] = float(s.period_stats.get("xp_earned", 0.0)) + amount
+
+
+func bag_free_space() -> int:
+	var n := 0
+	for sl in s.inventory.slots_of_type("Bag"):
+		n += sl.stack.max_height - sl.stack.height()
+	return n
+
+
+## 进货：从本地店买入，直接装进行囊。返回 {ok, reason}。
+func purchase(sku_id: String, qty: int, unit_price: float, _actor: String = "player") -> Dictionary:
+	var entry: Dictionary = {}
+	for e in s.supplier_catalog:
+		if e["sku_id"] == sku_id:
+			entry = e
+	if entry.is_empty():
+		return {"ok": false, "reason": "店里没有这款"}
+	if qty <= 0 or qty > int(entry["stock"]):
+		return {"ok": false, "reason": "库存不足"}
+	var total := unit_price * qty
+	if total > s.player.cash + 0.0001:
+		return {"ok": false, "reason": "现金不够"}
+	if qty > bag_free_space():
+		return {"ok": false, "reason": "行囊装不下"}
+	s.player.cash -= total
+	entry["stock"] = int(entry["stock"]) - qty
+	for i in qty:
+		var it := s.inventory.create_item(sku_id, {"bought_period": s.clock.period, "unit_cost": unit_price, "source": "local_shop"})
+		for sl in s.inventory.slots_of_type("Bag"):
+			if not sl.stack.is_full():
+				place_on_top(it, sl.id)
+				break
+	s.period_stats["purchases"] = float(s.period_stats["purchases"]) + total
+	s.knowledge.add_ledger(s.clock.period, "purchase", -total, "%s ×%d @%.1f" % [DataDB.sku_display_name(sku_id), qty, unit_price])
+	s.bus.emit("purchase", {"sku_id": sku_id, "qty": qty, "total": total})
+	_xp(1.0 * qty)
+	return {"ok": true}
+
+
+func place_on_top(item: ScarfItem, slot_id: String, _actor: String = "player") -> bool:
+	var sl := _slot(slot_id)
+	if sl == null or sl.stack.is_full():
+		return false
+	sl.stack.items.append(item)
+	sl.stack.recompute_disorder()
+	_touch(sl)
+	return true
+
+
+## 从堆中取出第 index 份。顶部直接拿；下层要过抽取结算（03 §2）。
+## pull_input 为玩家小游戏输入；actor_profile 非空时按客人 / 员工属性采样偏差。
+## 返回 {item, collapsed, displaced, d}；item 为 null 表示失败。
+func pull_item(slot_id: String, index: int, pull_input: Dictionary = CAREFUL_PULL, actor_profile: Dictionary = {}) -> Dictionary:
+	var sl := _slot(slot_id)
+	if sl == null or index < 0 or index >= sl.stack.height():
+		return {"item": null, "collapsed": false, "displaced": false, "d": 0.0}
+	var st := sl.stack
+	var n_above := st.count_above(index)
+	var res := {"collapsed": false, "displaced": false, "d": 0.0}
+	if n_above > 0 and PHYSICS_SLOT_TYPES.has(sl.type):
+		var d := PullPhysics.deviation_from_actor(actor_profile, s.rng) if not actor_profile.is_empty() \
+			else PullPhysics.deviation_from_input(pull_input)
+		res = PullPhysics.resolve(d, n_above, s.rng)
+	var item: ScarfItem = st.items[index]
+	st.items.remove_at(index)
+	if res["collapsed"]:
+		# 目标上方的货全部倒在地上（03 §2.2）
+		var fallen := st.items.slice(index)
+		st.items.resize(index)
+		st.collapsed_pile.append_array(fallen)
+		s.period_stats["collapses"] = int(s.period_stats["collapses"]) + 1
+		s.bus.emit("stack_collapsed", {"slot_id": slot_id, "count": fallen.size()})
+	elif res["displaced"]:
+		st.displaced = true
+	st.recompute_disorder()
+	_touch(sl)
+	res["item"] = item
+	return res
+
+
+func take_top(slot_id: String) -> ScarfItem:
+	var sl := _slot(slot_id)
+	if sl == null or sl.stack.height() == 0:
+		return null
+	return pull_item(slot_id, sl.stack.height() - 1)["item"]
+
+
+## 在两个槽位之间挪一份货：抽出后只能放到目标堆顶（03 §4）。
+func move_item(from_slot: String, index: int, to_slot: String, pull_input: Dictionary = CAREFUL_PULL) -> Dictionary:
+	var dst := _slot(to_slot)
+	if dst == null or dst.stack.is_full():
+		return {"ok": false, "reason": "放不下"}
+	var r := pull_item(from_slot, index, pull_input)
+	if r["item"] == null:
+		return {"ok": false, "reason": "没有货"}
+	place_on_top(r["item"], to_slot)
+	r["ok"] = true
+	return r
+
+
+## 翻看（03 §3）：结果写入认知层，可能认错。有强化记忆悬浮框的槽位不需要翻看。
+func peek_item(slot_id: String, index: int) -> Dictionary:
+	var sl := _slot(slot_id)
+	if sl == null or index < 0 or index >= sl.stack.height():
+		return {}
+	var item: ScarfItem = sl.stack.items[index]
+	var p := Sampler.peek(item, s.rng)
+	s.knowledge.perceived[item.id] = p
+	return p
+
+
+## 理货：按给定顺序（item_id 列表，自底向上）重排整堆（03 §4）。
+func restack(slot_id: String, order: Array) -> bool:
+	var sl := _slot(slot_id)
+	if sl == null or order.size() != sl.stack.height():
+		return false
+	var by_id := {}
+	for it in sl.stack.items:
+		by_id[it.id] = it
+	var new_items: Array[ScarfItem] = []
+	for id in order:
+		if not by_id.has(id):
+			return false
+		new_items.append(by_id[id])
+	sl.stack.items = new_items
+	sl.stack.displaced = false
+	sl.stack.recompute_disorder()
+	_touch(sl)
+	return true
+
+
+## 拾起倒地货物放回堆顶（放不下的留在地上）。返回拾起件数。
+func pick_up_pile(slot_id: String) -> int:
+	var sl := _slot(slot_id)
+	if sl == null:
+		return 0
+	var n := 0
+	while not sl.stack.collapsed_pile.is_empty() and not sl.stack.is_full():
+		sl.stack.items.append(sl.stack.collapsed_pile.pop_back())
+		n += 1
+	sl.stack.recompute_disorder()
+	_touch(sl)
+	return n
+
+
+## 丢弃一份货（摆摊阶段行囊的残货可随时丢弃，01 §6.9）。
+func discard(slot_id: String, index: int) -> bool:
+	var r := pull_item(slot_id, index)
+	if r["item"] == null:
+		return false
+	s.knowledge.add_ledger(s.clock.period, "discard", 0.0, DataDB.sku_display_name(r["item"].sku_id))
+	return true
+
+
+func write_label(slot_id: String, text: String) -> void:
+	s.knowledge.labels[slot_id] = text
+
+
+## 卖出：从槽位取出该货并收钱。返回 pull 结果 + ok。
+func sell(slot_id: String, index: int, price: float, customer: CustomerProfile, reserve: float, pull_input: Dictionary = CAREFUL_PULL) -> Dictionary:
+	var r := pull_item(slot_id, index, pull_input)
+	var item: ScarfItem = r["item"]
+	if item == null:
+		return {"ok": false}
+	s.player.cash += price
+	var base_price := float(DataDB.sku(item.sku_id)["base_price"])
+	s.period_stats["sales"] = int(s.period_stats["sales"]) + 1
+	s.period_stats["revenue"] = float(s.period_stats["revenue"]) + price
+	s.period_stats["cost_of_goods"] = float(s.period_stats["cost_of_goods"]) + float(item.provenance.get("unit_cost", 0.0))
+	s.period_stats["price_ratio_sum"] = float(s.period_stats["price_ratio_sum"]) + price / base_price
+	s.customers.record_purchase(customer, price, reserve, float(SkillSystem.haggle_mods(s.player)["loyalty_bonus"]))
+	s.knowledge.add_ledger(s.clock.period, "sale", price, DataDB.sku_display_name(item.sku_id))
+	s.bus.emit("sale", {"item_id": item.id, "sku_id": item.sku_id, "price": price, "customer_id": customer.id})
+	_xp(4.0 + price * 0.05)
+	r["ok"] = true
+	return r
+
+
+## 收摊：摊位上的货（含地上的）全部收回行囊。返回装不下而被丢掉的件数。
+func pack_up() -> int:
+	var lost := 0
+	for sl in s.inventory.slots_of_type("StallTable"):
+		var all: Array[ScarfItem] = []
+		all.append_array(sl.stack.items)
+		all.append_array(sl.stack.collapsed_pile)
+		sl.stack.items.clear()
+		sl.stack.collapsed_pile.clear()
+		sl.stack.displaced = false
+		sl.stack.recompute_disorder()
+		for it in all:
+			var placed := false
+			for bag in s.inventory.slots_of_type("Bag"):
+				if place_on_top(it, bag.id):
+					placed = true
+					break
+			if not placed:
+				lost += 1
+				s.knowledge.add_ledger(s.clock.period, "discard", 0.0, "行囊装不下：" + DataDB.sku_display_name(it.sku_id))
+	return lost
