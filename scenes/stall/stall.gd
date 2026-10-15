@@ -27,6 +27,7 @@ var _haggle: HaggleState
 var _haggle_visitor: Dictionary = {}
 var _next_number := 1
 var _price_spin: SpinBox
+var _minigame: PullMinigame
 
 
 func _ready() -> void:
@@ -119,7 +120,7 @@ func _build() -> void:
 
 
 func _process(dt: float) -> void:
-	if phase != Phase.OPEN or speed <= 0.0:
+	if phase != Phase.OPEN or speed <= 0.0 or _minigame != null:
 		_area.step(0.0)
 		return
 	var sdt := dt * speed * Game.time_scale
@@ -208,7 +209,13 @@ func _on_strip(slot_id: String, index: int) -> void:
 func _on_slot(slot_id: String) -> void:
 	if _selected["slot_id"] == "" or _selected["slot_id"] == slot_id:
 		return
-	var r := api.move_item(_selected["slot_id"], _selected["index"], slot_id)
+	var from: String = _selected["slot_id"]
+	var idx: int = _selected["index"]
+	_with_pull(from, idx, func(input): _do_move(from, idx, slot_id, input))
+
+
+func _do_move(from: String, idx: int, slot_id: String, input: Dictionary) -> void:
+	var r := api.move_item(from, idx, slot_id, input)
 	if not r["ok"]:
 		_say("放不下了。")
 	elif r["collapsed"]:
@@ -235,6 +242,25 @@ func _on_pile(slot_id: String) -> void:
 	_say("拾起了 %d 份放回堆顶。" % n if n > 0 else "堆满了，放不回去。")
 	_spend(1.0 + n)
 	_refresh_slots()
+
+
+## 从堆下面抽货要玩抽取小游戏；顶上的、行囊里的直接拿。then(input) 在拿到之后调用。
+func _with_pull(slot_id: String, index: int, then: Callable) -> void:
+	var sl: Slot = s.inventory.slots[slot_id]
+	if index >= sl.stack.height() - 1 or not ActionAPI.PHYSICS_SLOT_TYPES.has(sl.type):
+		then.call(ActionAPI.CAREFUL_PULL)
+		return
+	_minigame = PullMinigame.new().setup(sl.stack, index, "从堆里抽出这份")
+	add_child(_minigame)
+	_minigame.finished.connect(func(ok, input, seconds):
+		_minigame.queue_free()
+		_minigame = null
+		_spend(seconds)
+		if ok:
+			then.call(input)
+		else:
+			_say("没抽。")
+			_refresh_all())
 
 
 ## 动手干活要花时间（营业中才算）。
@@ -309,7 +335,16 @@ func _after_haggle_step() -> void:
 
 
 func _end_haggle() -> void:
-	var r := session.finish(_haggle_visitor, _haggle)
+	if _haggle.result == "deal":
+		var loc := session.locate(_haggle_visitor["item_id"])
+		if not loc.is_empty():
+			_with_pull(loc["slot_id"], loc["index"], func(input): _finish_haggle(input))
+			return
+	_finish_haggle(ActionAPI.CAREFUL_PULL)
+
+
+func _finish_haggle(input: Dictionary) -> void:
+	var r := session.finish(_haggle_visitor, _haggle, input)
 	if _haggle.result == "deal":
 		if r.get("ok", false):
 			_say("[color=#6cc070]卖出一条，收 %d 元。[/color]" % roundi(_haggle.final_price))

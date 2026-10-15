@@ -60,3 +60,36 @@ static func resolve(d: float, n_above: int, rng: GameRng) -> Dictionary:
 	var collapsed := rng.chance(p)
 	var displaced := not collapsed and d * n_above * shift_scale > shift_threshold
 	return {"collapsed": collapsed, "displaced": displaced, "d": d, "p_collapse": p}
+
+
+## 小游戏拖动轨迹 → 玩家输入（03 §2.1）。samples: [{t: 秒, pos: Vector2(像素)}]，按时间顺序。
+## point: 按下的位置是 corner / edge / center。speed_unit: 多少像素/秒算 1.0 的手速。
+static func input_from_drag(samples: Array, point: String, speed_unit: float = 600.0) -> Dictionary:
+	if samples.size() < 2:
+		return {"angle_deg": 0.0, "point": point, "early_speed": 0.0, "jerk": 0.0}
+	var first: Vector2 = samples[0]["pos"]
+	var last: Vector2 = samples[-1]["pos"]
+	var d := last - first
+	# 屏幕坐标 y 向下；角度只看与水平面的夹角
+	var angle := rad_to_deg(atan2(absf(d.y), absf(d.x))) if d.length() > 0.01 else 0.0
+	var duration := maxf(0.001, float(samples[-1]["t"]) - float(samples[0]["t"]))
+	var speeds: Array[float] = []
+	for i in range(1, samples.size()):
+		var dt := maxf(0.001, float(samples[i]["t"]) - float(samples[i - 1]["t"]))
+		speeds.append((samples[i]["pos"] - samples[i - 1]["pos"]).length() / dt / speed_unit)
+	# 起手：前 30% 时间的平均手速
+	var early_sum := 0.0
+	var early_n := 0
+	var t0 := float(samples[0]["t"])
+	for i in speeds.size():
+		if float(samples[i + 1]["t"]) - t0 <= duration * 0.3:
+			early_sum += speeds[i]
+			early_n += 1
+	if early_n == 0:
+		early_sum = speeds[0]
+		early_n = 1
+	# 突变：相邻手速差的最大值（先慢后快是平滑加速，不算突变）
+	var jerk := 0.0
+	for i in range(1, speeds.size()):
+		jerk = maxf(jerk, absf(speeds[i] - speeds[i - 1]) - 0.15)
+	return {"angle_deg": angle, "point": point, "early_speed": early_sum / early_n, "jerk": maxf(0.0, jerk)}
