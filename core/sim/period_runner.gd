@@ -25,7 +25,7 @@ static func end_period(s: GameState) -> Dictionary:
 		"label": s.clock.label(),
 		"traffic": st["traffic"], "stayed": st["stayed"], "sales": sales,
 		"revenue": st["revenue"], "cost_of_goods": st["cost_of_goods"], "purchases": st["purchases"],
-		"collapses": st["collapses"], "xp_earned": st["xp_earned"],
+		"collapses": st["collapses"], "xp_earned": st["xp_earned"], "ignored": st.get("ignored", 0),
 		"cash": s.player.cash,
 		"forecasts": [],
 		"season_changed": false, "year_changed": false,
