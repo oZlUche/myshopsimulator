@@ -7,6 +7,11 @@ extends RefCounted
 const PHYSICS_SLOT_TYPES := ["StallTable", "ShopDisplay", "ShopBackroom", "WarehouseShelf"]
 ## 玩家规范操作时的默认抽取输入（规划阶段 / 自动模拟用）
 const CAREFUL_PULL := {"angle_deg": 37.5, "point": "corner", "early_speed": 0.2, "jerk": 0.1}
+## 累计抽出货长的一半就算抽出来了（03 §2.1）
+const PULL_DONE := 0.5
+## 目标每被拉出 1 个货长，上一层被带着横移的比例（再往上逐层叠加）
+const ABOVE_DRAG := 0.08
+const MAX_SHIFT := 0.25
 
 var s: GameState
 
@@ -69,10 +74,28 @@ func place_on_top(item: ScarfItem, slot_id: String, _actor: String = "player") -
 	var sl := _slot(slot_id)
 	if sl == null or sl.stack.is_full():
 		return false
+	item.reset_pull()
 	sl.stack.items.append(item)
 	sl.stack.recompute_disorder()
 	_touch(sl)
 	return true
+
+
+## 抽到一半停手 / 每拉一段后记下进度（03 §2.1）：货抽出多少就停在多少，不会缩回，
+## 上方被带歪的货也保持原样。out: 目标已抽出的比例（±）；d_sum / w_sum: 偏差分按抽出距离加权的累计；
+## shift: 这段拉动对目标本身的横向带动（±，占货长比例），上方的货按层数传递一部分。
+func record_pull_progress(slot_id: String, index: int, out: float, d_sum: float, w_sum: float, shift: float) -> void:
+	var sl := _slot(slot_id)
+	if sl == null or index < 0 or index >= sl.stack.height():
+		return
+	var it: ScarfItem = sl.stack.items[index]
+	it.pull_out = clampf(out, -PULL_DONE, PULL_DONE)
+	it.pull_d_sum = d_sum
+	it.pull_w_sum = w_sum
+	for i in range(index + 1, sl.stack.height()):
+		var above: ScarfItem = sl.stack.items[i]
+		above.shift = clampf(above.shift + shift * ABOVE_DRAG * (i - index), -MAX_SHIFT, MAX_SHIFT)
+	_touch(sl)
 
 
 ## 从堆中取出第 index 份。顶部直接拿；下层要过抽取结算（03 §2）。
@@ -91,10 +114,13 @@ func pull_item(slot_id: String, index: int, pull_input: Dictionary = CAREFUL_PUL
 		res = PullPhysics.resolve(d, n_above, s.rng)
 	var item: ScarfItem = st.items[index]
 	st.items.remove_at(index)
+	item.reset_pull()
 	if res["collapsed"]:
 		# 目标上方的货全部倒在地上（03 §2.2）
 		var fallen := st.items.slice(index)
 		st.items.resize(index)
+		for f in fallen:
+			f.reset_pull()
 		st.collapsed_pile.append_array(fallen)
 		s.period_stats["collapses"] = int(s.period_stats["collapses"]) + 1
 		s.bus.emit("stack_collapsed", {"slot_id": slot_id, "count": fallen.size()})
@@ -151,6 +177,8 @@ func restack(slot_id: String, order: Array) -> bool:
 			return false
 		new_items.append(by_id[id])
 	sl.stack.items = new_items
+	for it in new_items:
+		it.reset_pull()
 	sl.stack.displaced = false
 	sl.stack.recompute_disorder()
 	_touch(sl)

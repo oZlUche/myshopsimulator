@@ -9,7 +9,7 @@ func shot(name):
 	if dir != "" and DisplayServer.get_name() != "headless":
 		root.get_texture().get_image().save_png("%s/%s.png" % [dir, name])
 ## 用好手法（按角落、斜向约 40°、先慢后快）把当前小游戏里的货拉出来。
-func good_pull(st, take_shot := false):
+func good_pull(st, take_shot := false, max_steps := 200):
 	var mg = st._minigame
 	mg.set_process(false)  # 测试直接喂轨迹，不读真实鼠标
 	for i in 3: await process_frame
@@ -22,7 +22,7 @@ func good_pull(st, take_shot := false):
 	var p = press.position
 	var speeds = [60, 80, 100, 140, 200, 280, 380, 480, 560, 600]
 	var k = 0
-	while st._minigame != null and k < 200:
+	while st._minigame != null and k < max_steps:
 		p += Vector2(-1, -0.84).normalized() * speeds[mini(k, speeds.size() - 1)] * 0.05
 		mg._elapsed += 0.05
 		mg.drag_step(p, 0.05)
@@ -72,6 +72,30 @@ func _init() -> void:
 	await good_pull(st, true)
 	assert(st._minigame == null, "好手法应能把货拉出来")
 	assert(tables[0].stack.height() + tables[0].stack.collapsed_pile.size() == before - 1)
+	# 拉一半停手：货停在外面不缩回；再打开接着拉，累计过半就抽出来
+	var t1 = tables[1]
+	if t1.stack.height() >= 2 and not tables[2].stack.is_full():
+		var h1 = t1.stack.height()
+		var target = t1.stack.items[0]
+		st._selected = {"slot_id": t1.id, "index": 0}
+		st._on_slot(tables[2].id)
+		await good_pull(st, false, 9)
+		var release = InputEventMouseButton.new()
+		release.button_index = MOUSE_BUTTON_LEFT
+		release.pressed = false
+		st._minigame._gui_input(release)
+		await shot("3c_pull_paused")
+		st._minigame._stop()
+		assert(st._minigame == null)
+		assert(t1.stack.height() == h1, "停手不该把货抽走")
+		assert(target.pull_out < 0.0 and target.pull_out > -0.5, "停手后货停在外面 %f" % target.pull_out)
+		await shot("3d_stack_after_pause")
+		st._selected = {"slot_id": t1.id, "index": 0}
+		st._on_slot(tables[2].id)
+		assert(is_equal_approx(st._minigame._out, target.pull_out), "再打开应接着上次的进度")
+		await good_pull(st)
+		assert(st._minigame == null)
+		assert(t1.stack.height() + t1.stack.collapsed_pile.size() == h1 - 1)
 	st._on_main_button()
 	var guard = 0
 	while guard < 3000:

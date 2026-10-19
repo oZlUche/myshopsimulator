@@ -11,6 +11,8 @@ signal pile_pressed(slot_id: String)
 
 const STRIP_H := 14
 const PILE_H := 22
+## 抽出 / 带歪的位移在小格子里按比例缩小画，免得画出格子
+const SHOW_SCALE := 0.3
 
 var slot: Slot
 var title: String = ""
@@ -34,6 +36,13 @@ func _strip_rect(i: int) -> Rect2:
 	return Rect2(8 + off * (i % 2), bottom - (i + 1) * STRIP_H, size.x - 16 - off, STRIP_H - 2)
 
 
+## 实际摆放位置：抽到一半的货露在外面，被带歪的货偏在一边（03 §2.1）。
+func _item_rect(i: int) -> Rect2:
+	var r := _strip_rect(i)
+	var it: ScarfItem = slot.stack.items[i]
+	return Rect2(r.position + Vector2((it.pull_out + it.shift) * r.size.x * SHOW_SCALE, 0), r.size)
+
+
 func _pile_rect() -> Rect2:
 	return Rect2(4, size.y - PILE_H - 2, size.x - 8, PILE_H)
 
@@ -50,7 +59,7 @@ func _draw() -> void:
 	var k: Knowledge = Game.state.knowledge if Game.state else null
 	for i in slot.stack.height():
 		var it: ScarfItem = slot.stack.items[i]
-		var r := _strip_rect(i)
+		var r := _item_rect(i)
 		draw_rect(r, UIKit.sku_color(it.sku_id))
 		draw_rect(Rect2(r.position, Vector2(r.size.x, 2)), Color(1, 1, 1, 0.18))
 		draw_rect(r, Color(1, 1, 1, 0.35), false, 1.0)
@@ -81,7 +90,7 @@ func _ink(bg: Color) -> Color:
 
 func _index_at(p: Vector2) -> int:
 	for i in slot.stack.height():
-		if _strip_rect(i).has_point(p):
+		if _item_rect(i).has_point(p):
 			return i
 	return -1
 
