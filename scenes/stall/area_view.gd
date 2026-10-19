@@ -105,14 +105,14 @@ func _draw() -> void:
 				var fit := Iso.outfit(int(w["seed"]))
 				var vel: Vector2 = w["vel"]
 				# 往 gx 负方向或往里（gy 变小）走就是背对镜头
-				var f := Iso.facing_of(vel)
-				Iso.draw_person(self, p, fit[0], fit[1], f[0], t + float(w["seed"]) * 0.1, f[1])
+				var fc := Iso.facing_of(vel)
+				Iso.draw_person(self, p, fit[0], fit[1], fc[0], t + float(w["seed"]) * 0.1, fc[1])
 			"visitor":
 				var v: Dictionary = th["v"]
 				var fit := Iso.outfit(hash(v["customer"].id))
 				# 客人站在摊前，面朝摊桌（+gy）
-				var f := Iso.facing_of(Vector2(0, 1))
-				Iso.draw_person(self, p, fit[0], fit[1], f[0], 0.0, f[1])
+				var fc := Iso.facing_of(Vector2(0, 1))
+				Iso.draw_person(self, p, fit[0], fit[1], fc[0], 0.0, fc[1])
 				var col := {"browsing": Color("#b8b5c4"), "asking": UIKit.ACCENT, "haggling": Color("#6fa8dc")}.get(v["state"], Color.GRAY) as Color
 				draw_string(font, p + Vector2(-14, -40), "#%d" % visitor_numbers.get(v["customer"].id, 0), HORIZONTAL_ALIGNMENT_CENTER, 28, 13, col)
 				if v["state"] == "asking":
@@ -125,8 +125,8 @@ func _draw() -> void:
 				_draw_table(o)
 			"player":
 				# 你站在摊桌后面，面朝街（-gy），背对镜头
-				var f := Iso.facing_of(Vector2(0, -1))
-				Iso.draw_person(self, p, UIKit.ACCENT, Color("#2a2026"), f[0], 0.0, f[1], 1.15)
+				var fc := Iso.facing_of(Vector2(0, -1))
+				Iso.draw_person(self, p, UIKit.ACCENT, Color("#2a2026"), fc[0], 0.0, fc[1], 1.15)
 				draw_string(font, p + Vector2(-30, 14), "你", HORIZONTAL_ALIGNMENT_CENTER, 60, 12, UIKit.TEXT)
 	# 范围边框
 	var edge := Iso.tile_points(Vector2.ZERO, o, cols(), ROWS)
