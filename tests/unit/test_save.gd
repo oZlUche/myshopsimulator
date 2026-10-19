@@ -6,6 +6,11 @@ const FAKE := {
 }
 
 
+## JSON 里不分整数和浮点（读回来都是浮点），比较前先统一走一遍 JSON。
+func _norm(v: Variant) -> String:
+	return JSON.stringify(JSON.parse_string(JSON.stringify(v)))
+
+
 func _played_state() -> GameState:
 	var s := GameState.new_game(99)
 	PeriodRunner.begin_period(s)
@@ -23,7 +28,7 @@ func test_roundtrip_is_lossless() -> void:
 	var r := sm.load_from_string(text)
 	assert_true(r["ok"], str(r.get("error", "")))
 	var b: Dictionary = r["state"].to_dict()
-	assert_eq(JSON.stringify(b), JSON.stringify(JSON.parse_string(text)), "存档 → 读档 → 存档 应完全一致")
+	assert_eq(_norm(b), _norm(JSON.parse_string(text)), "存档 → 读档 → 存档 应完全一致")
 
 
 func test_unknown_fields_are_preserved() -> void:
@@ -35,7 +40,7 @@ func test_unknown_fields_are_preserved() -> void:
 	var r := sm.load_from_string(JSON.stringify(d))
 	assert_true(r["ok"])
 	var merged := SaveManager.deep_merge(sm._raw, r["state"].to_dict())
-	assert_eq(JSON.stringify(merged.get("mod_data")), JSON.stringify({"x": 1}))
+	assert_eq(_norm(merged.get("mod_data")), _norm({"x": 1}))
 	assert_eq(merged["player"].get("future_field"), "keep me")
 
 
