@@ -28,6 +28,7 @@ var _haggle_visitor: Dictionary = {}
 var _next_number := 1
 var _price_spin: SpinBox
 var _minigame: PullMinigame
+var _visitor_rows: Dictionary = {}   # 客人 id → 右侧名单里的那一行
 
 
 func _ready() -> void:
@@ -172,29 +173,50 @@ func _refresh_slots() -> void:
 			box.add_child(v)
 
 
+func _visitor_text(v: Dictionary) -> String:
+	var num: int = _area.visitor_numbers.get(v["customer"].id, 0)
+	var regular := "（常客）" if v["customer"].is_regular else ""
+	match v["state"]:
+		"asking":
+			return "#%d%s 在问价，还能等 %d 秒 → 去招呼" % [num, regular, int(float(v["wait"]))]
+		"haggling":
+			return "#%d%s 正在跟你讲价" % [num, regular]
+		_:
+			return "#%d%s 在看货" % [num, regular]
+
+
 func _refresh_visitors() -> void:
-	# 只在名单变化时重建，避免每帧重建按钮
+	# 名单（谁在、什么状态）没变时只改文字，不重建控件。按钮要到松开鼠标才触发，
+	# 以前倒计时每秒变一次就整列重建一次，按下和松开之间按钮被换掉，这一下点击就丢了。
 	var sig := ""
 	for v in session.visitors:
-		sig += "%s:%s:%d|" % [v["customer"].id, v["state"], int(float(v["wait"]))]
+		sig += "%s:%s|" % [v["customer"].id, v["state"]]
 	if _visitor_box.get_meta("sig", "") == sig:
+		for v in session.visitors:
+			var row = _visitor_rows.get(v["customer"].id)
+			if row != null:
+				row.text = _visitor_text(v)
 		return
 	_visitor_box.set_meta("sig", sig)
 	UIKit.clear(_visitor_box)
+	_visitor_rows.clear()
 	if session.visitors.is_empty():
 		_visitor_box.add_child(UIKit.label("（暂时没人）", 14, UIKit.MUTED))
 	for v in session.visitors:
-		var num: int = _area.visitor_numbers.get(v["customer"].id, 0)
-		var regular := "（常客）" if v["customer"].is_regular else ""
+		var row: Control
 		match v["state"]:
 			"asking":
-				var b := UIKit.button("#%d%s 在问价，还能等 %d 秒 → 去招呼" % [num, regular, int(float(v["wait"]))], func(): _start_haggle(v), 14)
+				var b := UIKit.button(_visitor_text(v), func(): _start_haggle(v), 14)
+				# 按下就算点到，新客人到来挤动名单时也不会吞掉松开那一下
+				b.action_mode = BaseButton.ACTION_MODE_BUTTON_PRESS
 				b.disabled = _haggle != null
-				_visitor_box.add_child(b)
+				row = b
 			"haggling":
-				_visitor_box.add_child(UIKit.label("#%d%s 正在跟你讲价" % [num, regular], 14, Color("#6fa8dc")))
+				row = UIKit.label(_visitor_text(v), 14, Color("#6fa8dc"))
 			_:
-				_visitor_box.add_child(UIKit.label("#%d%s 在看货" % [num, regular], 14, UIKit.MUTED))
+				row = UIKit.label(_visitor_text(v), 14, UIKit.MUTED)
+		_visitor_rows[v["customer"].id] = row
+		_visitor_box.add_child(row)
 
 
 # ---------- 摆货 ----------
