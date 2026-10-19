@@ -90,7 +90,7 @@ func _build() -> void:
 
 	_area = AreaView.new()
 	_area.session = session
-	_area.custom_minimum_size = Vector2(0, 240)
+	_area.custom_minimum_size = Vector2(0, 270)
 	left.add_child(_area)
 
 	left.add_child(UIKit.label("摊位（从正面只看得到每份货露出的边缘颜色；右键翻看，悬停看记忆）", 13, UIKit.MUTED))
