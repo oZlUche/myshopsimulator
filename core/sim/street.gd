@@ -6,9 +6,12 @@ extends RefCounted
 var length: float = 60.0
 ## 人流峰值 [{x, sigma, peak}]，叠加成密度曲线
 var hotspots: Array = []
-## 已在摆摊的商贩 [{id, x, radius}]
+## 已在摆摊的商贩 [{id, x, y?, radius}]；y 是摊子中心横穿街的位置，老存档没有就用 DEFAULT_VENDOR_Y
 var vendors: Array = []
 var base_density: float = 0.15
+
+## 商贩摊子中心默认所在的那一排（格坐标 gy，靠店面那侧）
+const DEFAULT_VENDOR_Y := 1.5
 
 
 static func generate(rng: GameRng) -> Street:
@@ -32,11 +35,18 @@ func density(x: float, t: float = 0.5) -> float:
 	return d * time_mult
 
 
-func can_place(x: float) -> bool:
+static func vendor_pos(v: Dictionary) -> Vector2:
+	return Vector2(float(v["x"]), float(v.get("y", DEFAULT_VENDOR_Y)))
+
+
+## 能不能在 (x, y) 摆摊：离每个商贩摊子中心的直线距离都不小于它的排他半径（圆形判定）。
+## 只给 x 时按商贩那一排算。
+func can_place(x: float, y: float = DEFAULT_VENDOR_Y) -> bool:
 	if x < 0.0 or x > length:
 		return false
+	var p := Vector2(x, y)
 	for v in vendors:
-		if absf(x - float(v["x"])) < float(v["radius"]):
+		if p.distance_to(vendor_pos(v)) < float(v["radius"]):
 			return false
 	return true
 

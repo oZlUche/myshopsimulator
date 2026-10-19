@@ -8,6 +8,20 @@ func test_vendor_exclusion_radius() -> void:
 	assert_true(st.can_place(14.0))
 
 
+func test_vendor_exclusion_is_a_circle() -> void:
+	var st := Street.new()
+	st.vendors = [{"id": "v", "x": 10.0, "y": 1.5, "radius": 3.0}]
+	# 沿街方向和横穿街方向一样远：都在圆内
+	assert_true(not st.can_place(12.0, 1.5))
+	assert_true(not st.can_place(10.0, 3.5))
+	# 斜对角：x、y 各差 2.5，单看哪一维都在半径内，但直线距离 3.54 已在圆外
+	assert_true(st.can_place(12.5, 4.0))
+	# 老存档的商贩没有 y，按默认那一排算
+	st.vendors = [{"id": "v", "x": 10.0, "radius": 3.0}]
+	assert_true(not st.can_place(10.0, Street.DEFAULT_VENDOR_Y + 2.9))
+	assert_true(st.can_place(10.0, Street.DEFAULT_VENDOR_Y + 3.1))
+
+
 func test_full_stall_period_runs_and_sells() -> void:
 	var s := GameState.new_game(7)
 	PeriodRunner.begin_period(s)
