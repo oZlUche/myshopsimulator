@@ -250,19 +250,21 @@ func _with_pull(slot_id: String, index: int, then: Callable) -> void:
 	if index >= sl.stack.height() - 1 or not ActionAPI.PHYSICS_SLOT_TYPES.has(sl.type):
 		then.call(ActionAPI.CAREFUL_PULL)
 		return
-	_minigame = PullMinigame.new().setup(sl.stack, index, "从堆里抽出这份")
+	_minigame = PullMinigame.new().setup(api, slot_id, index, "从堆里抽出这份")
 	add_child(_minigame)
-	_minigame.finished.connect(func(ok, input, seconds, progress):
+	_minigame.finished.connect(func(ok, result, seconds):
 		_minigame.queue_free()
 		_minigame = null
-		# 抽出多少停在多少，上面带歪的货也保持原样（03 §2.1）
-		api.record_pull_progress(slot_id, index, progress["out"], progress["d_sum"], progress["w_sum"], progress["shift"])
 		_spend(seconds)
 		if ok:
-			then.call(input)
-		else:
-			_say("先停手了，那份货抽出 %d%% 露在外面。" % roundi(absf(float(progress["out"])) * 100.0) if progress["out"] != 0.0 else "没抽。")
-			_refresh_all())
+			then.call(result)
+			return
+		# 抽出多少停在多少，上面带歪的货也保持原样（03 §2.1）
+		if result["collapsed"]:
+			_say("[color=#e05a4f]抽的时候上面的货塌了，掉了一地！点地上那堆可以拾起来。[/color]")
+		var out := absf(float(result["out"]))
+		_say("先停手了，那份货抽出 %d%% 露在外面。" % roundi(out * 100.0) if out > 0.0 else "没抽。")
+		_refresh_all())
 
 
 ## 动手干活要花时间（营业中才算）。

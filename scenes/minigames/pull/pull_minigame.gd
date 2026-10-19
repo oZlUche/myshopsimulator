@@ -1,12 +1,12 @@
 class_name PullMinigame
 extends Control
-## 抽取小游戏（03 §2.1）：侧面看货堆，按住目标货的发力点拖出来。
+## 抽取小游戏（03 §2.1）：正面看货堆，按住目标货的发力点拖出来。
 ## 最佳：按角落、斜向 30°–45°、先慢后快。上方越重，货越"跟不上手"。
 ## 货抽出多少就停在多少，不会缩回；可以分几次拉，累计抽出一半就算抽出来了。
-## 每段拖动轨迹各自换算成偏差分，按这段拉出的距离加权平均，交给 ActionAPI 走统一的倒塌结算。
+## 每段（按住到松手）各自换算成偏差分，经 ActionAPI.pull_segment 单独掷一次倒塌 / 位移判定。
 
-## success 时 pull_input 为 {d}；progress 为 {out, d_sum, w_sum, shift}，调用方经 ActionAPI 记下（不论成败）。
-signal finished(success: bool, pull_input: Dictionary, seconds: float, progress: Dictionary)
+## result: {resolved: true, out, collapsed, displaced}。success 时直接交给 ActionAPI 取货（判定已经掷过）。
+signal finished(success: bool, result: Dictionary, seconds: float)
 
 const BAR_W := 360.0
 const BAR_H := 24.0
@@ -14,6 +14,8 @@ const BAR_H := 24.0
 var stack: ItemStack
 var index: int
 var title := ""
+var api: ActionAPI
+var slot_id := ""
 
 var _holding := false
 var _point := "center"
@@ -25,28 +27,24 @@ var _cancel: Button
 var _done := false
 ## 已抽出的比例（±，占货长），只增不减
 var _out := 0.0
-var _d_sum := 0.0
-var _w_sum := 0.0
-## 这次打开以来目标被带着横移的累计（传给上方的货）
-var _shift := 0.0
 var _seg_start := 0.0
+## 这一段把目标横向带动了多少（松手时交给 ActionAPI 传给上方的货）
+var _seg_shift := 0.0
+var _collapsed := false
+var _displaced := false
 ## 按住时货被微微抬起（只是手感，松手就落回去）
 var _lift := 0.0
-var _base_shift: Array[float] = []
 
 
-func setup(st: ItemStack, idx: int, t: String) -> PullMinigame:
-	stack = st
+func setup(action_api: ActionAPI, sl_id: String, idx: int, t: String) -> PullMinigame:
+	api = action_api
+	slot_id = sl_id
+	stack = api.s.inventory.slots[sl_id].stack
 	index = idx
 	title = t
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	UIKit.full_rect(self)
-	var it: ScarfItem = st.items[idx]
-	_out = it.pull_out
-	_d_sum = it.pull_d_sum
-	_w_sum = it.pull_w_sum
-	for x in st.items:
-		_base_shift.append(x.shift)
+	_out = stack.items[idx].pull_out
 	_hint = "按住白框那份货的一角，斜着往外拉，先慢后快。" if _out == 0.0 \
 		else "上次已经抽出 %d%%，接着拉。" % roundi(absf(_out) * 100.0)
 	return self
@@ -72,13 +70,15 @@ func _target_rect() -> Rect2:
 	return Rect2(r.position + Vector2(_out * BAR_W, _lift), r.size)
 
 
+## 第 i 份货的位置：按它实际所在的层画（下面被抽空的层留着空隙）。
 func _bar_rect(i: int) -> Rect2:
 	var base := Vector2(_panel().position.x + 180, _panel().end.y - 70)
-	return Rect2(base.x, base.y - (i + 1) * BAR_H, BAR_W, BAR_H - 2)
+	var layer := stack.layer_of(i)
+	return Rect2(base.x, base.y - (layer + 1) * BAR_H, BAR_W, BAR_H - 2)
 
 
-func progress() -> Dictionary:
-	return {"out": _out, "d_sum": _d_sum, "w_sum": _w_sum, "shift": _shift}
+func result() -> Dictionary:
+	return {"resolved": true, "out": _out, "collapsed": _collapsed, "displaced": _displaced}
 
 
 func _process(dt: float) -> void:
@@ -107,26 +107,32 @@ func drag_step(m: Vector2, dt: float) -> void:
 		if _out != 0.0 and signf(dx) != signf(_out):
 			dx = 0.0
 		_out = clampf(_out + dx, -ActionAPI.PULL_DONE, ActionAPI.PULL_DONE)
-		_shift += dx
+		_seg_shift += dx
 		# 往上带一点，往下压不动
 		_lift = clampf(_lift + minf(step.y, 0.0), -BAR_H * 0.5, 0.0)
 	queue_redraw()
 	if absf(_out) >= ActionAPI.PULL_DONE:
 		_end_segment()
 		_done = true
-		finished.emit(true, {"d": _d_sum / maxf(_w_sum, 0.001)}, _elapsed, progress())
+		finished.emit(true, result(), _elapsed)
 
 
-## 一次按住到松手算一段：这段的手法偏差按这段拉出的距离计权。
+## 一次按住到松手算一段：这段的手法单独掷一次倒塌 / 位移判定，进度记进货堆。
 func _end_segment() -> void:
 	if not _holding:
 		return
 	_holding = false
 	_lift = 0.0
-	var w := absf(_out - _seg_start)
-	if w > 0.0:
-		_d_sum += PullPhysics.deviation_from_input(PullPhysics.input_from_drag(_samples, _point)) * w
-		_w_sum += w
+	if _out == _seg_start:
+		return
+	var d := PullPhysics.deviation_from_input(PullPhysics.input_from_drag(_samples, _point))
+	var res := api.pull_segment(slot_id, index, _out, d, _seg_shift)
+	_seg_shift = 0.0
+	if res["collapsed"]:
+		_collapsed = true
+		_hint = "上面的货塌了，掉了一地！这份还露在外面。"
+	elif res["displaced"]:
+		_displaced = true
 
 
 func _stop() -> void:
@@ -134,7 +140,7 @@ func _stop() -> void:
 		return
 	_end_segment()
 	_done = true
-	finished.emit(false, {}, _elapsed, progress())
+	finished.emit(false, result(), _elapsed)
 
 
 func _gui_input(e: InputEvent) -> void:
@@ -147,8 +153,8 @@ func _gui_input(e: InputEvent) -> void:
 			_seg_start = _out
 			_hint = {"corner": "抓住了角。", "edge": "抓在边上，不太好使力。", "center": "抓在中间，很难带出来。"}[_point]
 		elif not e.pressed and _holding:
-			_end_segment()
 			_hint = "松手了，货停在抽出 %d%% 的地方。接着拉，或者先停手。" % roundi(absf(_out) * 100.0)
+			_end_segment()
 		queue_redraw()
 		accept_event()
 
@@ -178,15 +184,18 @@ func _draw() -> void:
 	# 桌面
 	var table_y := _panel().end.y - 70
 	draw_rect(Rect2(_panel().position.x + 140, table_y, BAR_W + 80, 10), Color("#8a6a4a"))
-	# 上方的货被带歪的位置一直保留
+	# 上方的货被带歪的位置一直保留；这一段正在带动的部分先画出来，松手后记进货堆
 	for i in stack.height():
 		if i == index:
 			continue
-		var sh := _base_shift[i]
+		var sh := stack.items[i].shift
 		if i > index:
-			sh = clampf(sh + _shift * ActionAPI.ABOVE_DRAG * (i - index), -ActionAPI.MAX_SHIFT, ActionAPI.MAX_SHIFT)
+			sh = clampf(sh + _seg_shift * ActionAPI.ABOVE_DRAG * (i - index), -ActionAPI.MAX_SHIFT, ActionAPI.MAX_SHIFT)
 		var r := _bar_rect(i)
 		_draw_bar(Rect2(r.position + Vector2(sh * BAR_W, 0), r.size), stack.items[i].sku_id, false)
+	for i in stack.collapsed_pile.size():
+		var pr := Rect2(_panel().position.x + 150 + (i % 6) * 64.0, table_y + 12 + floorf(i / 6.0) * 8.0, 56, 8)
+		draw_rect(pr, UIKit.sku_color(stack.collapsed_pile[i].sku_id))
 	var tr := _target_rect()
 	_draw_bar(tr, stack.items[index].sku_id, true)
 	# 抽出进度：过了虚线就算抽出来了

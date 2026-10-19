@@ -75,32 +75,55 @@ func place_on_top(item: ScarfItem, slot_id: String, _actor: String = "player") -
 	if sl == null or sl.stack.is_full():
 		return false
 	item.reset_pull()
+	sl.stack.settle()
 	sl.stack.items.append(item)
 	sl.stack.recompute_disorder()
 	_touch(sl)
 	return true
 
 
-## 抽到一半停手 / 每拉一段后记下进度（03 §2.1）：货抽出多少就停在多少，不会缩回，
-## 上方被带歪的货也保持原样。out: 目标已抽出的比例（±）；d_sum / w_sum: 偏差分按抽出距离加权的累计；
-## shift: 这段拉动对目标本身的横向带动（±，占货长比例），上方的货按层数传递一部分。
-func record_pull_progress(slot_id: String, index: int, out: float, d_sum: float, w_sum: float, shift: float) -> void:
+## 抽取小游戏里拉完一段（按住到松手）：货停在抽出的位置不缩回，上方的货被带歪的状态保留；
+## 这段手法单独掷一次倒塌 / 位移判定（03 §2.1）。out: 目标已抽出的比例（±）；
+## d: 这段的偏差分；shift: 这段把目标横向带动了多少（±，占货长比例），上方的货按层数传递一部分。
+## 返回 {collapsed, displaced, d, p_collapse}。塌了的话目标上面的货全倒在地上，目标本身还在原位露着。
+func pull_segment(slot_id: String, index: int, out: float, d: float, shift: float) -> Dictionary:
+	var res := {"collapsed": false, "displaced": false, "d": d, "p_collapse": 0.0}
 	var sl := _slot(slot_id)
 	if sl == null or index < 0 or index >= sl.stack.height():
-		return
-	var it: ScarfItem = sl.stack.items[index]
-	it.pull_out = clampf(out, -PULL_DONE, PULL_DONE)
-	it.pull_d_sum = d_sum
-	it.pull_w_sum = w_sum
-	for i in range(index + 1, sl.stack.height()):
-		var above: ScarfItem = sl.stack.items[i]
+		return res
+	var st := sl.stack
+	st.items[index].pull_out = clampf(out, -PULL_DONE, PULL_DONE)
+	for i in range(index + 1, st.height()):
+		var above: ScarfItem = st.items[i]
 		above.shift = clampf(above.shift + shift * ABOVE_DRAG * (i - index), -MAX_SHIFT, MAX_SHIFT)
+	var n_above := st.count_above(index)
+	if n_above > 0 and PHYSICS_SLOT_TYPES.has(sl.type):
+		res = PullPhysics.resolve(d, n_above, s.rng)
+		_apply_physics(sl, index + 1, res)
+	st.recompute_disorder()
 	_touch(sl)
+	return res
+
+
+## 倒塌：第 first 份及以上全部倒在地上（03 §2.2）；没塌但偏差大则整堆被带歪。
+func _apply_physics(sl: Slot, first: int, res: Dictionary) -> void:
+	var st := sl.stack
+	if res["collapsed"]:
+		var fallen := st.items.slice(first)
+		st.items.resize(first)
+		for f in fallen:
+			f.reset_pull()
+		st.collapsed_pile.append_array(fallen)
+		s.period_stats["collapses"] = int(s.period_stats["collapses"]) + 1
+		s.bus.emit("stack_collapsed", {"slot_id": sl.id, "count": fallen.size()})
+	elif res["displaced"]:
+		st.displaced = true
 
 
 ## 从堆中取出第 index 份。顶部直接拿；下层要过抽取结算（03 §2）。
-## pull_input 为玩家小游戏输入；actor_profile 非空时按客人 / 员工属性采样偏差。
-## 返回 {item, collapsed, displaced, d}；item 为 null 表示失败。
+## pull_input 为玩家手法；actor_profile 非空时按客人 / 员工属性采样偏差。
+## pull_input.resolved 为真表示小游戏里已经一段段掷过判定，这里直接取走。
+## 取走后上面的货不往下沉，留出空隙（03 §2.4）。返回 {item, collapsed, displaced, d}；item 为 null 表示失败。
 func pull_item(slot_id: String, index: int, pull_input: Dictionary = CAREFUL_PULL, actor_profile: Dictionary = {}) -> Dictionary:
 	var sl := _slot(slot_id)
 	if sl == null or index < 0 or index >= sl.stack.height():
@@ -108,24 +131,19 @@ func pull_item(slot_id: String, index: int, pull_input: Dictionary = CAREFUL_PUL
 	var st := sl.stack
 	var n_above := st.count_above(index)
 	var res := {"collapsed": false, "displaced": false, "d": 0.0}
-	if n_above > 0 and PHYSICS_SLOT_TYPES.has(sl.type):
+	if pull_input.get("resolved", false):
+		res = {"collapsed": pull_input.get("collapsed", false), "displaced": pull_input.get("displaced", false), "d": 0.0}
+	elif n_above > 0 and PHYSICS_SLOT_TYPES.has(sl.type):
 		var d := PullPhysics.deviation_from_actor(actor_profile, s.rng) if not actor_profile.is_empty() \
 			else PullPhysics.deviation_from_input(pull_input)
 		res = PullPhysics.resolve(d, n_above, s.rng)
 	var item: ScarfItem = st.items[index]
 	st.items.remove_at(index)
+	if not pull_input.get("resolved", false):
+		_apply_physics(sl, index, res)
+	if index < st.height():
+		st.items[index].gap_below += 1 + item.gap_below
 	item.reset_pull()
-	if res["collapsed"]:
-		# 目标上方的货全部倒在地上（03 §2.2）
-		var fallen := st.items.slice(index)
-		st.items.resize(index)
-		for f in fallen:
-			f.reset_pull()
-		st.collapsed_pile.append_array(fallen)
-		s.period_stats["collapses"] = int(s.period_stats["collapses"]) + 1
-		s.bus.emit("stack_collapsed", {"slot_id": slot_id, "count": fallen.size()})
-	elif res["displaced"]:
-		st.displaced = true
 	st.recompute_disorder()
 	_touch(sl)
 	res["item"] = item
@@ -191,6 +209,7 @@ func pick_up_pile(slot_id: String) -> int:
 	if sl == null:
 		return 0
 	var n := 0
+	sl.stack.settle()
 	while not sl.stack.collapsed_pile.is_empty() and not sl.stack.is_full():
 		sl.stack.items.append(sl.stack.collapsed_pile.pop_back())
 		n += 1

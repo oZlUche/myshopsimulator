@@ -143,41 +143,71 @@ func test_drag_good_technique_is_low_deviation() -> void:
 	assert_true(d_bad > 2.0, "坏手法偏差应大：%f %s" % [d_bad, str(bad)])
 
 
+func _table_with(s: GameState, api: ActionAPI, n: int) -> Slot:
+	var table: Slot = s.inventory.slots_of_type("StallTable")[0]
+	for i in n:
+		api.place_on_top(s.inventory.create_item("scarf_solid_red_wool"), table.id)
+	return table
+
+
 func test_partial_pull_stays_out_and_above_keeps_shift() -> void:
 	var s := _state()
 	var api := ActionAPI.new(s)
-	var table: Slot = s.inventory.slots_of_type("StallTable")[0]
-	for i in 3:
-		api.place_on_top(s.inventory.create_item("scarf_solid_red_wool"), table.id)
-	# 抽到 30% 停手：货停在外面，上面两层被带歪，越往上越歪
-	api.record_pull_progress(table.id, 0, -0.3, 0.06, 0.3, -0.3)
+	var table := _table_with(s, api, 3)
 	var st := table.stack
+	# 好手法拉到 30% 停手：货停在外面，上面两层被带歪，越往上越歪
+	var r := api.pull_segment(table.id, 0, -0.3, 0.0, -0.3)
+	if r["collapsed"]:
+		return
 	assert_near(st.items[0].pull_out, -0.3)
 	assert_true(st.items[1].shift < 0.0 and st.items[2].shift < st.items[1].shift, "%f %f" % [st.items[1].shift, st.items[2].shift])
 	# 存档读回来还在
 	var back := ItemStack.from_dict(JSON.parse_string(JSON.stringify(st.to_dict())))
 	assert_near(back.items[0].pull_out, -0.3)
 	assert_near(back.items[2].shift, st.items[2].shift)
-	# 抽出后剩下的货保持带歪的位置
+	# 抽出后剩下的货不往下沉、不归位：留出一层空隙，带歪的保持带歪
 	var shift_top := st.items[2].shift
-	var r := api.pull_item(table.id, 0, {"d": 0.2})
-	assert_true(r["item"] != null)
-	assert_near(r["item"].pull_out, 0.0)
-	if not r["collapsed"]:
-		assert_near(st.items[1].shift, shift_top)
-	# 理货才归位
+	var got := api.pull_item(table.id, 0, {"resolved": true})
+	assert_true(got["item"] != null)
+	assert_near(got["item"].pull_out, 0.0)
+	assert_eq(st.height(), 2)
+	assert_eq(st.items[0].gap_below, 1)
+	assert_eq(st.layer_of(0), 1)
+	assert_eq(st.layer_of(1), 2)
+	assert_near(st.items[1].shift, shift_top)
+	assert_eq(ItemStack.from_dict(JSON.parse_string(JSON.stringify(st.to_dict()))).layer_of(1), 2)
+	# 放顶时压实，理货时归位
+	api.place_on_top(s.inventory.create_item("scarf_solid_red_wool"), table.id)
+	assert_eq(st.layer_of(2), 2)
 	api.restack(table.id, st.items.map(func(it): return it.id))
 	for it in st.items:
 		assert_near(it.shift, 0.0)
 
 
+func test_each_segment_rolls_its_own_collapse() -> void:
+	# 每段单独判定：粗暴的一段可以在没抽出来之前就把上面弄塌，目标还露在原位
+	var collapsed := false
+	for attempt in 30:
+		var s := _state()
+		var api := ActionAPI.new(s)
+		var table := _table_with(s, api, 3)
+		var r := api.pull_segment(table.id, 0, 0.2, 4.0, 0.2)
+		if r["collapsed"]:
+			collapsed = true
+			assert_eq(table.stack.height(), 1)
+			assert_eq(table.stack.collapsed_pile.size(), 2)
+			assert_near(table.stack.items[0].pull_out, 0.2)
+			break
+	assert_true(collapsed, "偏差很大的一段应该能弄塌")
+	# 好手法的一段几乎不会塌
+	var s2 := _state()
+	var api2 := ActionAPI.new(s2)
+	var t2 := _table_with(s2, api2, 3)
+	assert_true(api2.pull_segment(t2.id, 0, 0.1, 0.0, 0.1)["p_collapse"] < 0.1)
+
+
 func test_old_item_without_pull_fields_loads() -> void:
 	var it := ScarfItem.from_dict({"id": "i1", "sku_id": "scarf_solid_red_wool"})
 	assert_near(it.pull_out, 0.0)
+	assert_eq(it.gap_below, 0)
 	assert_true(not it.to_dict().has("pull"), "没动过的货不写 pull 字段")
-
-
-func test_split_pull_deviation_is_distance_weighted() -> void:
-	# 一段好手法拉了 40%，一段坏手法拉了 10%：平均偏差靠近好手法
-	var d := (0.1 * 0.4 + 3.0 * 0.1) / 0.5
-	assert_near(PullPhysics.deviation_from_input({"d": d}), 0.68)

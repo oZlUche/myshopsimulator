@@ -36,9 +36,9 @@ func _strip_rect(i: int) -> Rect2:
 	return Rect2(8 + off * (i % 2), bottom - (i + 1) * STRIP_H, size.x - 16 - off, STRIP_H - 2)
 
 
-## 实际摆放位置：抽到一半的货露在外面，被带歪的货偏在一边（03 §2.1）。
+## 实际摆放位置：抽到一半的货露在外面，被带歪的货偏在一边，下面被抽空的层留着空隙（03 §2.1、§2.4）。
 func _item_rect(i: int) -> Rect2:
-	var r := _strip_rect(i)
+	var r := _strip_rect(slot.stack.layer_of(i))
 	var it: ScarfItem = slot.stack.items[i]
 	return Rect2(r.position + Vector2((it.pull_out + it.shift) * r.size.x * SHOW_SCALE, 0), r.size)
 

@@ -37,6 +37,20 @@ func weight_above(index: int) -> float:
 	return w
 
 
+## 第 index 份实际所在的层（算上下面空出来的层）。
+func layer_of(index: int) -> int:
+	var layer := 0
+	for i in index + 1:
+		layer += items[i].gap_below
+	return layer + index
+
+
+## 压实：上面的货落下去把空隙填上（放顶、拾起放回时，03 §2.4）。
+func settle() -> void:
+	for it in items:
+		it.gap_below = 0
+
+
 func index_of(item_id: String) -> int:
 	for i in items.size():
 		if items[i].id == item_id:
