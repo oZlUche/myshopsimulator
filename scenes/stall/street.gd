@@ -3,9 +3,14 @@ extends Control
 ## 人流密度不直接显示，只能从走过的行人多少来判断。选址时时间不走。
 
 const WALK_SPEED := 8.0
+## 横穿街慢一些：街只有几格宽
+const CROSS_SPEED := 4.0
 
 var s: GameState
 var player_x := 2.0
+var player_y := 3.2
+## 玩家最后一次走的方向（格坐标），决定朝向；停下来也保持
+var player_dir := Vector2(1, 0)
 var walkers: Array = []   # [{x, y, vx, life}]
 var _msg: Label
 var _msg_time := 0.0
@@ -17,7 +22,7 @@ func _ready() -> void:
 	top.position = Vector2(16, 12)
 	add_child(top)
 	top.add_child(UIKit.label("%s　找个地方摆摊" % s.clock.label(), 20, UIKit.ACCENT))
-	top.add_child(UIKit.label("← → 或 A D 沿街走；空格或下面的按钮在脚下摆摊。人多的地方生意好，但商贩也扎堆；离商贩太近不能摆。", 14, UIKit.MUTED))
+	top.add_child(UIKit.label("方向键或 WASD 走：← → 沿街，↑ ↓ 横穿街。空格或下面的按钮在脚下摆摊。人多的地方生意好，但商贩也扎堆；离别的摊子中心太近（虚线圈内）不能摆。", 14, UIKit.MUTED))
 	var bar := UIKit.hbox(10)
 	bar.position = Vector2(16, 650)
 	add_child(bar)
@@ -32,12 +37,11 @@ func _ready() -> void:
 
 
 func _process(dt: float) -> void:
-	var dir := Input.get_axis("ui_left", "ui_right")
-	if Input.is_key_pressed(KEY_A):
-		dir = -1.0
-	elif Input.is_key_pressed(KEY_D):
-		dir = 1.0
-	player_x = clampf(player_x + dir * WALK_SPEED * dt, 0.5, s.street.length - 0.5)
+	var dir := _move_dir()
+	if dir != Vector2.ZERO:
+		player_dir = dir
+	player_x = clampf(player_x + dir.x * WALK_SPEED * dt, 0.5, s.street.length - 0.5)
+	player_y = clampf(player_y + dir.y * CROSS_SPEED * dt, MIN_Y, MAX_Y)
 	_step_walkers(dt)
 	if _msg_time > 0.0:
 		_msg_time -= dt
@@ -64,15 +68,35 @@ func _step_walkers(dt: float) -> void:
 	walkers = walkers.filter(func(w): return w["life"] > 0.0)
 
 
-## 镜头跟着玩家走：玩家脚下固定在屏幕这个位置。
+## 四向移动（不走斜线）：← → / A D 沿街（gx），↑ ↓ / W S 横穿街（gy，↑ 往店面那侧）。同时按时沿街优先。
+func _move_dir() -> Vector2:
+	var h := Input.get_axis("ui_left", "ui_right")
+	if Input.is_key_pressed(KEY_A):
+		h = -1.0
+	elif Input.is_key_pressed(KEY_D):
+		h = 1.0
+	if h != 0.0:
+		return Vector2(signf(h), 0)
+	var v := Input.get_axis("ui_up", "ui_down")
+	if Input.is_key_pressed(KEY_W):
+		v = -1.0
+	elif Input.is_key_pressed(KEY_S):
+		v = 1.0
+	return Vector2(0, signf(v))
+
+
+## 镜头跟着玩家沿街走：参考点（玩家 x、街中间那排）固定在屏幕这个位置；横穿街时镜头不动。
 const CAMERA_AT := Vector2(640, 420)
-## 玩家沿街走的那一排（格坐标 gy）；1–5 是街面，0 以里是店面
-const PLAYER_GY := 3.2
+## 镜头参考的那一排（格坐标 gy）；0 和 5 是人行道，1–4 是街面，0 以里是店面
+const CAMERA_GY := 3.2
+## 玩家能走的横穿街范围：两侧人行道之间
+const MIN_Y := 0.3
+const MAX_Y := 5.7
 const VIEW_M := 18
 
 
 func _origin() -> Vector2:
-	return CAMERA_AT - Iso.to_screen(Vector2(player_x, PLAYER_GY), Vector2.ZERO)
+	return CAMERA_AT - Iso.to_screen(Vector2(player_x, CAMERA_GY), Vector2.ZERO)
 
 
 func _walker_g(w: Dictionary) -> Vector2:
@@ -97,9 +121,15 @@ func _draw() -> void:
 			else:
 				col = Color("#3f5a3a") if (x * 3 + gy) % 5 != 0 else Color("#4a6a42")
 			Iso.draw_tile(self, o, Vector2(x, gy), col)
+	# 别的摊子的排他范围：以摊子中心为圆心的圆，站进去就不能摆
+	for v in s.street.vendors:
+		var c := Street.vendor_pos(v)
+		if absf(c.x - player_x) < VIEW_M:
+			var inside := Vector2(player_x, player_y).distance_to(c) < float(v["radius"])
+			_draw_ground_circle(o, c, float(v["radius"]), Color(UIKit.BAD, 0.85 if inside else 0.35), inside)
 	# 站位提示：脚下这格能不能摆
-	var ok := s.street.can_place(player_x)
-	Iso.draw_tile(self, o, Vector2(player_x - 0.5, PLAYER_GY - 0.5), Color(UIKit.GOOD if ok else UIKit.BAD, 0.45), 1.0, 1.0, UIKit.GOOD if ok else UIKit.BAD)
+	var ok := s.street.can_place(player_x, player_y)
+	Iso.draw_tile(self, o, Vector2(player_x - 0.5, player_y - 0.5), Color(UIKit.GOOD if ok else UIKit.BAD, 0.45), 1.0, 1.0, UIKit.GOOD if ok else UIKit.BAD)
 	# 店面一排（最靠里，先画）
 	var bx := x0 - (x0 % 4)
 	while bx < x1:
@@ -108,13 +138,13 @@ func _draw() -> void:
 	# 摊子、行人、玩家按远近排序再画
 	var things: Array = []
 	for v in s.street.vendors:
-		var vx := float(v["x"])
-		if absf(vx - player_x) < VIEW_M:
-			things.append({"g": Vector2(vx, 1.2), "kind": "vendor"})
+		var c := Street.vendor_pos(v)
+		if absf(c.x - player_x) < VIEW_M:
+			things.append({"g": c - Vector2(0, 0.3), "kind": "vendor"})
 	for w in walkers:
 		if float(w["x"]) >= 0.0 and float(w["x"]) <= s.street.length:
 			things.append({"g": _walker_g(w), "kind": "walker", "w": w})
-	things.append({"g": Vector2(player_x, PLAYER_GY), "kind": "player"})
+	things.append({"g": Vector2(player_x, player_y), "kind": "player"})
 	things.sort_custom(func(a, b): return Iso.depth(a["g"]) < Iso.depth(b["g"]))
 	var font := get_theme_default_font()
 	var t := Time.get_ticks_msec() / 1000.0
@@ -131,12 +161,25 @@ func _draw() -> void:
 				_draw_walker(p, fit, float(w["vx"]), t + float(w["seed"]) * 0.1, a)
 			"player":
 				var p := Iso.to_screen(g, o)
-				Iso.draw_person(self, p, UIKit.ACCENT, Color("#2a2026"), 1.0, t if _walking() else 0.0, false, 1.2)
+				var f := Iso.facing_of(player_dir)
+				Iso.draw_person(self, p, UIKit.ACCENT, Color("#2a2026"), f[0], t if _walking() else 0.0, f[1], 1.2)
 				draw_string(font, p + Vector2(-30, -48), "你", HORIZONTAL_ALIGNMENT_CENTER, 60, 14, UIKit.TEXT)
 
 
 func _walking() -> bool:
-	return Input.get_axis("ui_left", "ui_right") != 0.0 or Input.is_key_pressed(KEY_A) or Input.is_key_pressed(KEY_D)
+	return _move_dir() != Vector2.ZERO
+
+
+## 地面上的圆（斜 45° 下看是个扁椭圆）：虚线描边，inside 时淡淡填一层。
+func _draw_ground_circle(o: Vector2, c: Vector2, r: float, col: Color, filled: bool) -> void:
+	var pts := PackedVector2Array()
+	for i in 48:
+		var a := TAU * i / 48.0
+		pts.append(Iso.to_screen(c + Vector2(cos(a), sin(a)) * r, o))
+	if filled:
+		draw_colored_polygon(pts, Color(col, 0.18))
+	for i in range(0, 48, 2):
+		draw_line(pts[i], pts[i + 1], col, 2.0)
 
 
 ## 路人：沿街走（gx 方向是屏幕右下，往回走是左上，背对镜头）。快消失时变淡。
@@ -145,7 +188,8 @@ func _draw_walker(p: Vector2, fit: Array, vx: float, phase: float, a: float) -> 
 	var hair: Color = fit[1]
 	body.a = a
 	hair.a = a
-	Iso.draw_person(self, p, body, hair, 1.0 if vx > 0.0 else -1.0, phase, vx < 0.0)
+	var f := Iso.facing_of(Vector2(vx, 0))
+	Iso.draw_person(self, p, body, hair, f[0], phase, f[1])
 
 
 func _draw_building(o: Vector2, bx: int) -> void:
@@ -166,9 +210,10 @@ func _draw_building(o: Vector2, bx: int) -> void:
 		Iso.draw_face_rect(self, o, g, 3.8, 2.0, 0.72, 0.9, 44.0, 62.0, Color("#bcd4e0"))
 
 
-## 别的商贩：摊主站在桌后，桌上有块布，头顶撑着棚子。
+## 别的商贩：摊主站在桌后（店面那侧）面朝街，桌上有块布，头顶撑着棚子。
 func _draw_vendor_stall(o: Vector2, g: Vector2) -> void:
-	Iso.draw_person(self, Iso.to_screen(g + Vector2(0, -0.5), o), Color("#6a6a7a"), Color("#1a1a1a"), 1.0)
+	var f := Iso.facing_of(Vector2(0, 1))
+	Iso.draw_person(self, Iso.to_screen(g + Vector2(0, -0.5), o), Color("#6a6a7a"), Color("#1a1a1a"), f[0], 0.0, f[1])
 	var tg := g + Vector2(-0.7, 0.0)
 	Iso.draw_box(self, o, tg, 1.4, 0.6, 16.0, Color("#7a4b3a"), Color("#c8b089"))
 	var canopy := o + Vector2(0, -44)
@@ -180,7 +225,7 @@ func _draw_vendor_stall(o: Vector2, g: Vector2) -> void:
 
 
 func _try_place() -> void:
-	if not s.street.can_place(player_x):
+	if not s.street.can_place(player_x, player_y):
 		_msg.text = "这里离别的摊子太近了，人家不让摆。"
 		_msg_time = 2.5
 		return

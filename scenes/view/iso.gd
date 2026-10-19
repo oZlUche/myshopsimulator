@@ -108,6 +108,14 @@ static func draw_person(ci: CanvasItem, foot: Vector2, body: Color, hair: Color,
 	ci.draw_arc(head, r, 0.0, TAU, 20, OUTLINE, 1.0)
 
 
+## 格坐标里的移动 / 朝向方向 → draw_person 用的 [facing, back]。
+## 四个朝向：+gx 右前（脸朝镜头）、+gy 左前（脸朝镜头）、-gx 左后（背对）、-gy 右后（背对）。
+static func facing_of(dir: Vector2) -> Array:
+	var sx := dir.x - dir.y
+	var sy := dir.x + dir.y
+	return [1.0 if sx >= 0.0 else -1.0, sy < 0.0]
+
+
 ## 按 id 稳定地给路人挑一套衣服 / 发色。
 static func outfit(seed_value: int) -> Array:
 	const BODIES := ["#c85a3c", "#3c7ac8", "#5aa05a", "#9a5ac8", "#d8a03c", "#4a8a8a", "#c8c0b0", "#6a6a7a", "#b84a7a"]
