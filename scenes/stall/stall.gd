@@ -252,14 +252,16 @@ func _with_pull(slot_id: String, index: int, then: Callable) -> void:
 		return
 	_minigame = PullMinigame.new().setup(sl.stack, index, "从堆里抽出这份")
 	add_child(_minigame)
-	_minigame.finished.connect(func(ok, input, seconds):
+	_minigame.finished.connect(func(ok, input, seconds, progress):
 		_minigame.queue_free()
 		_minigame = null
+		# 抽出多少停在多少，上面带歪的货也保持原样（03 §2.1）
+		api.record_pull_progress(slot_id, index, progress["out"], progress["d_sum"], progress["w_sum"], progress["shift"])
 		_spend(seconds)
 		if ok:
 			then.call(input)
 		else:
-			_say("没抽。")
+			_say("先停手了，那份货抽出 %d%% 露在外面。" % roundi(absf(float(progress["out"])) * 100.0) if progress["out"] != 0.0 else "没抽。")
 			_refresh_all())
 
 
