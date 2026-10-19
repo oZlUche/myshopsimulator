@@ -28,11 +28,8 @@ static func item_speed(v_hand: float, weight_above: float, theta_deg: float, poi
 	return v_hand / (1.0 + k_w * weight_above) * f_angle(theta_deg) * float(POINT_FACTOR.get(point, 0.4))
 
 
-## 玩家输入 → 偏差分。input: {angle_deg, point, early_speed, jerk}，
-## 或分几段拉出来时已按距离加权算好的 {d}。
+## 玩家输入 → 偏差分。input: {angle_deg, point, early_speed, jerk}
 static func deviation_from_input(input: Dictionary) -> float:
-	if input.has("d"):
-		return float(input["d"])
 	var theta := float(input.get("angle_deg", OPTIMAL_ANGLE_DEG))
 	var angle_dev := 0.0 if theta >= 30.0 and theta <= 45.0 else absf(theta - OPTIMAL_ANGLE_DEG) / OPTIMAL_ANGLE_DEG
 	var point_dev := 1.0 - float(POINT_FACTOR.get(input.get("point", "center"), 0.4))

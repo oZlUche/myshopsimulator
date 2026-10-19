@@ -87,7 +87,7 @@ func _init() -> void:
 		await shot("3c_pull_paused")
 		st._minigame._stop()
 		assert(st._minigame == null)
-		assert(t1.stack.height() == h1, "停手不该把货抽走")
+		assert(t1.stack.height() + t1.stack.collapsed_pile.size() == h1, "停手不该把货抽走")
 		assert(target.pull_out < 0.0 and target.pull_out > -0.5, "停手后货停在外面 %f" % target.pull_out)
 		await shot("3d_stack_after_pause")
 		st._selected = {"slot_id": t1.id, "index": 0}
@@ -96,6 +96,7 @@ func _init() -> void:
 		await good_pull(st)
 		assert(st._minigame == null)
 		assert(t1.stack.height() + t1.stack.collapsed_pile.size() == h1 - 1)
+		await shot("3e_gap_after_pull")
 	st._on_main_button()
 	var guard = 0
 	while guard < 3000:

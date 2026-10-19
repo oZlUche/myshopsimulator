@@ -143,5 +143,5 @@ func _draw_table(o: Vector2) -> void:
 		var st: ItemStack = tables[j].stack
 		var cell := g + Vector2(w * (j + 0.15) / n, 0.12)
 		for i in st.height():
-			var sub := o + Vector2(0, -H - i * 4.0)
+			var sub := o + Vector2(0, -H - st.layer_of(i) * 4.0)
 			Iso.draw_box(self, sub, cell, w * 0.7 / n, 0.46, 4.0, UIKit.sku_color(st.items[i].sku_id))
