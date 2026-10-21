@@ -8,6 +8,9 @@ const PERIOD_SECONDS := 900.0
 const BASE_STAY_P := 0.35
 ## 人流密度 → 每秒过路客数的换算
 const TRAFFIC_SCALE := 0.12
+## 合拍客人保底计时器（06 §3.1）：间隔 T = T0 / (1 + k·摊上货物份数)
+const FIT_T0 := 90.0
+const FIT_K := 0.08
 
 signal visitor_arrived(visitor: Dictionary)
 signal visitor_left(visitor: Dictionary)
@@ -23,6 +26,9 @@ var x: float
 ## ctx: VisitContext；want: 谈成待交的货 [{item_id, sku_id, price, reserve, done}]；hint: 他指货时你看到的位置描述
 var visitors: Array = []
 var _spawn_acc := 0.0
+var _fit_acc := 0.0
+## 计时器到点了：下一位过路客按摊上实际摆着的货生成
+var _fit_pending := false
 var _returning: Array[CustomerProfile] = []
 
 
@@ -54,6 +60,10 @@ func tick(dt: float) -> void:
 	var t := s.clock.time_of_period
 	var width := float(area_radius() * 2 + 1)
 	_spawn_acc += s.street.density(x, t) * width * TRAFFIC_SCALE * dt
+	_fit_acc += dt
+	if _fit_acc >= fit_interval():
+		_fit_acc = 0.0
+		_fit_pending = true
 	while _spawn_acc >= 1.0:
 		_spawn_acc -= 1.0
 		_passerby()
@@ -78,7 +88,7 @@ func tick(dt: float) -> void:
 
 ## 谈成了却没拿到货就走了：计入流失，常客回购率下降。
 func _lose_deal(v: Dictionary) -> void:
-	s.period_stats["undelivered"] = int(s.period_stats.get("undelivered", 0)) + 1
+	s.period_stats["lost_after_deal"] = int(s.period_stats.get("lost_after_deal", 0)) + 1
 	s.customers.penalize(v["customer"], 0.1)
 
 
@@ -91,7 +101,46 @@ func _leave(v: Dictionary) -> void:
 func _passerby() -> void:
 	s.period_stats["traffic"] = int(s.period_stats["traffic"]) + 1
 	var c := CustomerProfile.generate(s.customers.new_customer_id(), s.econ_now(), s.trend_now(), s.rng)
+	if _fit_pending and _fit_to_stall(c):
+		_fit_pending = false
 	_consider(c, false)
+
+
+## 合拍客人保底的间隔：货摆得越多，越快等到一位（10 份约 50 秒，25 份约 30 秒）。
+func fit_interval() -> float:
+	return FIT_T0 / (1.0 + FIT_K * table_goods())
+
+
+## 把这位过路客的喜好对准摊上实际摆着的某一份货（06 §3.1）。摊上没货返回 false。
+## TODO(06 §1)：性格表示拍板后，再把热闹偏好 c 设成让 m_crowd(c, H) ≥ 0.9 的值、从原型里抽人。
+func _fit_to_stall(c: CustomerProfile) -> bool:
+	var pool: Array = []
+	for sl in s.inventory.slots_of_type("StallTable"):
+		pool.append_array(sl.stack.items)
+	if pool.is_empty():
+		return false
+	var sku := DataDB.sku(s.rng.pick(pool).sku_id)
+	c.preference = {"color": sku["color"], "pattern": sku["pattern"], "material": sku["material"]}
+	return true
+
+
+## 摊位上摆着几份货（不算地上塌的）。
+func table_goods() -> int:
+	var n := 0
+	for sl in s.inventory.slots_of_type("StallTable"):
+		n += sl.stack.height()
+	return n
+
+
+## 摊位热闹程度 H ∈ [0.1, 1]（06 §3.1）：摊前的人越多、摆的货越多越热闹。
+func heat() -> float:
+	return clampf(0.1 + 0.3 * visitors.size() + 0.03 * table_goods(), 0.1, 1.0)
+
+
+## 热闹偏好 c ∈ [−1, 1] 对停留的倍率：c = 1 最爱热闹（= H），c = −1 最爱清净（= 1.1 − H），c = 0 无所谓（0.55）。
+## TODO(06 §1)：c 由性格派生，拍板后接进 _consider 的 stay_p。
+static func m_crowd(c: float, h: float) -> float:
+	return (1.0 + c) * 0.5 * h + (1.0 - c) * 0.5 * (1.1 - h)
 
 
 ## 逗留判定：stay_p = base × 吆喝修正 × 偏好匹配度 × 展示度（× 竞争、乱堆修正）。

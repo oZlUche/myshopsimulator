@@ -18,7 +18,8 @@ func _ready() -> void:
 	var profit := float(r.get("revenue", 0.0)) - float(r.get("purchases", 0.0))
 	for line in [
 		"路过摊位的人：%d　停下来看的：%d　成交：%d 件" % [r.get("traffic", 0), r.get("stayed", 0), r.get("sales", 0)],
-		"没顾上理会就走掉的客人：%d　谈成没拿到货：%d" % [r.get("ignored", 0), r.get("undelivered", 0)],
+		"没顾上理会就走掉的：%d　没找到想要的：%d" % [r.get("ignored", 0), r.get("no_match", 0)],
+		"被价格吓跑的：%d　谈成没拿到货：%d" % [r.get("scared_off", 0), r.get("lost_after_deal", 0)],
 		"营业额：%.1f 元　本旬进货：%.1f 元　进出相抵：%+.1f 元" % [r.get("revenue", 0.0), r.get("purchases", 0.0), profit],
 		"货堆倒塌：%d 次　收摊时行囊装不下丢掉：%d 件" % [r.get("collapses", 0), r.get("lost_on_pack_up", 0)],
 		"获得经验：%.0f" % r.get("xp_earned", 0.0),

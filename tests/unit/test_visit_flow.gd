@@ -106,7 +106,7 @@ func test_wrong_item_twice_and_he_leaves() -> void:
 	assert_true(v["ctx"].rapport < r0, "递错好感下降")
 	assert_eq(ss.deliver(v, hand)["result"], "wrong_left")
 	assert_eq(v["state"], "left")
-	assert_eq(int(ss.s.period_stats["undelivered"]), 1)
+	assert_eq(int(ss.s.period_stats["lost_after_deal"]), 1)
 
 
 func test_timeout_counts_lost_deal_and_hurts_regular() -> void:
@@ -119,7 +119,7 @@ func test_timeout_counts_lost_deal_and_hurts_regular() -> void:
 	_deal(ss, v)
 	ss.tick(float(v["wait"]) + 1.0)
 	assert_eq(v["state"], "left")
-	assert_eq(int(ss.s.period_stats["undelivered"]), 1)
+	assert_eq(int(ss.s.period_stats["lost_after_deal"]), 1)
 	assert_true(float(ss.s.customers.return_probability[c.id]) < p0, "常客没拿到货回购率下降")
 
 
