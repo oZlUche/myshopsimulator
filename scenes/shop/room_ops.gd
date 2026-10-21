@@ -50,9 +50,16 @@ func cart_foot() -> Vector2:
 
 
 # ---------- 走路 ----------
-## 走到 c 旁边（onto = 走到 c 上面）。走路按步数花时间，路被堵住就走不过去。
+## 走到 c 旁边（onto = 走到 c 上面）；c 上是设备就走到它开口那一侧（站得过去的话）。
+## 走路按步数花时间，路被堵住就走不过去。
 func walk_to(c: Vector2i, onto := false) -> bool:
-	var p := RoomGrid.path(inv(), loc, player_cell, c, onto)
+	var p: Array[Vector2i] = []
+	if not onto and inv().equipment_at(loc, c) != "":
+		var f := RoomGrid.front(inv(), loc, c)
+		if RoomGrid.walkable(inv(), loc, f):
+			p = RoomGrid.path(inv(), loc, player_cell, f, true)
+	if p.is_empty():
+		p = RoomGrid.path(inv(), loc, player_cell, c, onto)
 	if p.is_empty():
 		say.call("[color=#e05a4f]走不过去，路被挡住了。[/color]")
 		return false

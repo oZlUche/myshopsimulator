@@ -157,6 +157,8 @@ func _gui_input(e: InputEvent) -> void:
 func place_player(c: Vector2i) -> void:
 	player_g = Vector2(c)
 	_player_path.clear()
+	if c == inv.room_cell(loc, "stand"):
+		_player_dir = Vector2(0, 1)
 
 
 ## 沿着 RoomGrid.path 给的格子一格格走过去（只是动画，时间由场景按步数另算）。
@@ -182,6 +184,9 @@ func step(dt: float) -> void:
 			left = 0.0
 		if to.length() > 0.001:
 			_player_dir = to
+		if _player_path.is_empty() and Vector2i(player_g.round()) == inv.room_cell(loc, "stand"):
+			# 回到收银台后面：转过身朝着店里
+			_player_dir = Vector2(0, 1)
 	_player_phase = _player_phase + dt if not _player_path.is_empty() else 0.0
 	queue_redraw()
 
@@ -208,6 +213,7 @@ func _draw() -> void:
 				Iso.draw_ground(self, o, Vector2(x, y), "lot", x * 5 + y * 11)
 	_draw_walls(o, sz)
 	_draw_marks(o)
+	_draw_ground_frames(o)
 	# 立着的东西按远近排序后画
 	var things: Array = []
 	for eid in inv.equipment_in(loc):
@@ -261,8 +267,13 @@ func _draw_marks(o: Vector2) -> void:
 		draw_string(get_theme_default_font(), Iso.to_screen(d + Vector2(0.5, 1.0), o) + Vector2(-8, 14), "门", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, UIKit.MUTED)
 
 
-func _draw_overlay(o: Vector2) -> void:
-	var pulse := 0.55 + 0.45 * sin(Time.get_ticks_msec() / 160.0)
+func _pulse() -> float:
+	return 0.55 + 0.45 * sin(Time.get_ticks_msec() / 160.0)
+
+
+## 高亮、选中、悬停的菱形框画在地面层（设备和人之前），不会切过货架正面；立着的东西另外整体提亮 / 染色（_cell_tint）。
+func _draw_ground_frames(o: Vector2) -> void:
+	var pulse := _pulse()
 	for m in marks:
 		var pts := Iso.tile_points(Vector2(m["cell"]), o)
 		pts.append(pts[0])
@@ -275,19 +286,34 @@ func _draw_overlay(o: Vector2) -> void:
 		var col := Color(1, 1, 1, 0.6)
 		if placing_def != "":
 			col = UIKit.GOOD if placing_ok else UIKit.BAD
-			Iso.draw_box(self, o, Vector2(hover_cell) + Vector2(0.1, 0.1), 0.8, 0.8, _equip_height(placing_def), Color(col, 0.35), Color(col, 0.45))
 		var pts := Iso.tile_points(Vector2(hover_cell), o)
 		pts.append(pts[0])
 		draw_polyline(pts, col, 1.5)
 
 
-## 设备开口朝哪：朝着前面（+gy，临街那边）能站人就朝前，不然朝右前（+gx）。
+## 立在这格上的设备 / 箱堆画的时候乘的颜色：要的货在这（金框）、走不到（红框）往那个颜色染，选中、悬停时提亮。
+func _cell_tint(c: Vector2i) -> Color:
+	var col := Color.WHITE
+	for m in marks:
+		if m["cell"] == c:
+			col = col.lerp(m["color"], 0.35 * _pulse())
+	if c == selected_cell:
+		col *= 1.15
+	elif c == hover_cell and placing_def == "":
+		col *= 1.08
+	col.a = 1.0
+	return col
+
+
+## 摆设备时的预览：半透明的方块（绿能摆，红不行），画在最上面。
+func _draw_overlay(o: Vector2) -> void:
+	if placing_def != "" and RoomGrid.in_room(inv, loc, hover_cell):
+		var col := UIKit.GOOD if placing_ok else UIKit.BAD
+		Iso.draw_box(self, o, Vector2(hover_cell) + Vector2(0.1, 0.1), 0.8, 0.8, _equip_height(placing_def), Color(col, 0.35), Color(col, 0.45))
+
+
 func _facing(c: Vector2i) -> String:
-	if c.y + 1 >= room().y or RoomGrid.walkable(inv, loc, c + Vector2i(0, 1)):
-		return "sw"
-	if RoomGrid.walkable(inv, loc, c + Vector2i(1, 0)):
-		return "se"
-	return "sw"
+	return RoomGrid.facing(inv, loc, c)
 
 
 ## 设备用美术线程的像素图（docs/08 §5）：货架、橱窗每层按货堆从下往上画叠好的围巾（看得到的边缘色），
@@ -315,6 +341,7 @@ func _draw_equipment(o: Vector2, eid: String) -> void:
 				bags.append(sl.packages.filter(func(p): return not p.is_box()).size())
 			extra["boxes"] = boxes
 			extra["bags"] = bags
+	extra["col"] = _cell_tint(c)
 	Iso.draw_equipment(self, o, Vector2(c), def_id, _facing(c), extra)
 	# 抽塌了掉在设备前面地上的货
 	for sl in slots:
@@ -327,14 +354,15 @@ func _draw_equipment(o: Vector2, eid: String) -> void:
 ## 地堆：纸箱一箱箱摞起来，包是扁扁的一袋（隔着袋子透出最上面那条的颜色）。拆开的箱子颜色浅一点。
 func _draw_pile(o: Vector2, sl: Slot) -> void:
 	var g := Vector2(sl.grid_pos)
+	var tint := _cell_tint(sl.grid_pos)
 	var z := 0.0
 	for p in sl.packages:
 		if p.is_box():
-			Iso.draw_sprite(self, o, g, "eq_carton", Color.WHITE if p.sealed else Color(1.0, 0.93, 0.85), z)
+			Iso.draw_sprite(self, o, g, "eq_carton", (Color.WHITE if p.sealed else Color(1.0, 0.93, 0.85)) * tint, z)
 			z += BOX_ART_H
 		else:
 			var top := p.top_item()
-			Iso.draw_sprite(self, o, g + Vector2(0.3, 0.3), "eq_bag", Color.WHITE.lerp(UIKit.sku_color(top.sku_id), 0.45) if top else Color.WHITE, z)
+			Iso.draw_sprite(self, o, g + Vector2(0.3, 0.3), "eq_bag", (Color.WHITE.lerp(UIKit.sku_color(top.sku_id), 0.45) if top else Color.WHITE) * tint, z)
 			z += BAG_ART_H
 
 
