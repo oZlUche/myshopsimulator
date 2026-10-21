@@ -31,10 +31,11 @@ func _fit() -> Dictionary:
 	var n := float(cols() + ROWS)
 	var w := n * Iso.TW * 0.5
 	var h := n * Iso.TH * 0.5 + 60.0
-	var k := minf(1.5, minf(size.x / w, size.y / h))
+	# 像素风：缩放只取 0.5 的整数倍，原点对齐像素网格，精灵才不会糊
+	var k := maxf(0.5, floorf(minf(1.5, minf(size.x / w, size.y / h)) * 2.0) / 2.0)
 	# 菱形最左角是 (0, ROWS)，最上角是 (0, 0)
 	var left := Iso.to_screen(Vector2(0, ROWS), Vector2.ZERO).x
-	var origin := Vector2((size.x / k - w) * 0.5 - left, (size.y / k - h) * 0.5 + 50.0)
+	var origin := Iso.snap(Vector2((size.x / k - w) * 0.5 - left, (size.y / k - h) * 0.5 + 50.0))
 	return {"origin": origin, "k": k}
 
 
@@ -77,8 +78,9 @@ func visitor_g(i: int) -> Vector2:
 func visitor_rect(i: int) -> Rect2:
 	var f := _fit()
 	var k: float = f["k"]
-	var foot := Iso.to_screen(visitor_g(i), f["origin"]) * k
-	return Rect2(foot + Vector2(-13, -54) * k, Vector2(26, 58) * k)
+	var foot := Iso.to_screen(visitor_g(i), f["origin"])
+	var r := Iso.person_rect(foot)
+	return Rect2(r.position * k, r.size * k)
 
 
 func _gui_input(e: InputEvent) -> void:
@@ -104,12 +106,8 @@ func _draw() -> void:
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2(k, k))
 	for gx in cols():
 		for gy in ROWS:
-			var col: Color
-			if gy < 2:
-				col = Color("#5d5a66") if (gx + gy) % 2 == 0 else Color("#56535f")
-			else:
-				col = Color("#8c8578") if (gx + gy) % 2 == 0 else Color("#837c70")
-			Iso.draw_tile(self, o, Vector2(gx, gy), col)
+			# 远处两排是街面，人行道挨着街的那条边有路缘石
+			Iso.draw_ground(self, o, Vector2(gx, gy), "road" if gy < 2 else "pavement", gx * 7 + gy * 13, "nw" if gy == 2 else "")
 	# 远近排序：行人、客人、摊桌、你
 	var things: Array = []
 	for w in walkers:
@@ -126,29 +124,27 @@ func _draw() -> void:
 		match th["kind"]:
 			"walker":
 				var w: Dictionary = th["w"]
-				var fit := Iso.outfit(int(w["seed"]))
+				var fit := Iso.outfit_full(int(w["seed"]))
 				var vel: Vector2 = w["vel"]
 				# 往 gx 负方向或往里（gy 变小）走就是背对镜头
 				var fc := Iso.facing_of(vel)
-				Iso.draw_person(self, p, fit[0], fit[1], fc[0], t + float(w["seed"]) * 0.1, fc[1])
+				Iso.draw_person(self, p, fit["top"], fit["hair"], fc[0], t + float(w["seed"]) * 0.1, fc[1], 1.0, fit["style"], fit["pants"], fit["scarf"])
 			"visitor":
 				var v: Dictionary = th["v"]
-				var fit := Iso.outfit(hash(v["customer"].id))
+				var fit := Iso.outfit_full(hash(v["customer"].id))
 				# 客人站在摊前，面朝摊桌（+gy）
 				var fc := Iso.facing_of(Vector2(0, 1))
-				Iso.draw_person(self, p, fit[0], fit[1], fc[0], 0.0, fc[1])
+				Iso.draw_person(self, p, fit["top"], fit["hair"], fc[0], 0.0, fc[1], 1.0, fit["style"], fit["pants"], fit["scarf"])
 				var col := {"browsing": Color("#b8b5c4"), "asking": UIKit.ACCENT, "haggling": Color("#6fa8dc"), "waiting_item": UIKit.GOOD}.get(v["state"], Color.GRAY) as Color
-				draw_string(font, p + Vector2(-14, -40), "#%d" % visitor_numbers.get(v["customer"].id, 0), HORIZONTAL_ALIGNMENT_CENTER, 28, 13, col)
+				draw_string(font, p + Vector2(-14, -62), "#%d" % visitor_numbers.get(v["customer"].id, 0), HORIZONTAL_ALIGNMENT_CENTER, 28, 13, col)
+				var bubble_at := p + Vector2(14, -76)
 				if v["state"] == "asking":
-					draw_circle(p + Vector2(13, -44), 8.0, Color.WHITE)
-					draw_string(font, p + Vector2(7, -38), "？", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("#2a2230"))
+					Iso.draw_bubble(self, bubble_at, "ask")
 				elif v["state"] == "haggling":
-					draw_circle(p + Vector2(13, -44), 8.0, Color("#6fa8dc"))
-					draw_string(font, p + Vector2(6, -38), "¥", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color.WHITE)
+					Iso.draw_bubble(self, bubble_at, "haggle")
 				elif v["state"] == "waiting_item":
-					# 伸着手等货：气泡里一条小围巾，下面一截等待条
-					draw_circle(p + Vector2(13, -44), 8.0, UIKit.GOOD)
-					draw_rect(Rect2(p + Vector2(8, -47), Vector2(10, 5)), Color.WHITE)
+					# 伸着手等货：气泡里一条小围巾，脚下一截等待条
+					Iso.draw_bubble(self, bubble_at, "wait")
 					var left := clampf(float(v["wait"]) / maxf(session.wait_for_item(v["customer"]), 1.0), 0.0, 1.0)
 					draw_rect(Rect2(p + Vector2(-12, 4), Vector2(24, 3)), Color(0, 0, 0, 0.5))
 					draw_rect(Rect2(p + Vector2(-12, 4), Vector2(24 * left, 3)), UIKit.GOOD if left > 0.3 else Color("#e05a4f"))
@@ -157,27 +153,27 @@ func _draw() -> void:
 			"player":
 				# 你站在摊桌后面，面朝街（-gy），背对镜头
 				var fc := Iso.facing_of(Vector2(0, -1))
-				Iso.draw_person(self, p, UIKit.ACCENT, Color("#2a2026"), fc[0], 0.0, fc[1], 1.15)
-				draw_string(font, p + Vector2(-30, 14), "你", HORIZONTAL_ALIGNMENT_CENTER, 60, 12, UIKit.TEXT)
+				Iso.draw_person(self, p, UIKit.ACCENT, Color("#2a2026"), fc[0], 0.0, fc[1], 1.0, Iso.Hair.SHORT, Color("#3a3a4a"))
+				draw_string(font, p + Vector2(-30, 16), "你", HORIZONTAL_ALIGNMENT_CENTER, 60, 12, UIKit.TEXT)
 	# 范围边框
 	var edge := Iso.tile_points(Vector2.ZERO, o, cols(), ROWS)
 	edge.append(edge[0])
-	draw_polyline(edge, Color(1, 1, 1, 0.25), 1.0)
+	draw_polyline(edge, Color(1, 1, 1, 0.25), Iso.PX)
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	draw_string(font, Vector2(8, 18), "周遭 %d×%d 格（吆喝越好看得越远）" % [cols(), ROWS], HORIZONTAL_ALIGNMENT_LEFT, -1, 12, UIKit.MUTED)
 
 
-## 摊桌：一块板子，上面按摊位一格一格摆着叠起来的围巾（从侧面能看到每份的颜色）。
+## 摊桌：铺着桌布的板子，上面按摊位一格一格摞着叠好的围巾（从侧面能看到每份的颜色）。
 func _draw_table(o: Vector2) -> void:
 	var tables := session.s.inventory.slots_of_type("StallTable")
 	var n := maxi(1, tables.size())
 	var w := maxf(2.4, n * 0.9)
 	var g := Vector2(center_gx() - w * 0.5, TABLE_GY)
 	const H := 14.0
-	Iso.draw_box(self, o, g, w, 0.7, H, Color("#7a5a3a"), Color("#a8865a"))
+	Iso.draw_stall_table(self, o, g, w, 0.7, H)
 	for j in tables.size():
 		var st: ItemStack = tables[j].stack
-		var cell := g + Vector2(w * (j + 0.15) / n, 0.12)
+		var cell := g + Vector2(w * (j + 0.5) / n, 0.38)
+		var base := Iso.to_screen(cell, o) + Vector2(0, -H)
 		for i in st.height():
-			var sub := o + Vector2(0, -H - st.layer_of(i) * 4.0)
-			Iso.draw_box(self, sub, cell, w * 0.7 / n, 0.46, 4.0, UIKit.sku_color(st.items[i].sku_id))
+			Iso.draw_scarf_fold(self, base - Vector2(0, st.layer_of(i) * Iso.FOLD_STEP), UIKit.sku_color(st.items[i].sku_id), i * 7 + j)

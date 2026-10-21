@@ -21,7 +21,8 @@ core/            纯逻辑，不依赖场景（01 §7）
   sim/           时钟、经济双循环、趋势、街区、摆摊营业、旬末结算、抽取物理、技能、难度开关
   save/          存档与迁移链
 data/            数据表（JSON，稳定字符串 ID）
-scenes/          表现层
+scenes/          表现层（scenes/view/iso.gd 是斜 45° 像素绘制工具）
+assets/sprites/  像素精灵 PNG（由 tools/pixelart/gen_sprites.py 生成，脚本和图都提交；规范见 docs/07）
 tests/           单元测试、存档 fixture、调参工具
 ```
 
