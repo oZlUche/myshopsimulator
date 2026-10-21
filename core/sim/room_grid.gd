@@ -81,6 +81,20 @@ static func path(inv: Inventory, loc: String, from: Vector2i, target: Vector2i, 
 	return out
 
 
+## 设备开口朝哪：朝着前面（+gy，临街那边）能站人就朝前（sw），不然朝右前（+gx，se）。
+static func facing(inv: Inventory, loc: String, c: Vector2i) -> String:
+	if c.y + 1 >= inv.room_size(loc).y or walkable(inv, loc, c + Vector2i(0, 1)):
+		return "sw"
+	if walkable(inv, loc, c + Vector2i(1, 0)):
+		return "se"
+	return "sw"
+
+
+## 设备开口那一侧的格（客人看货、你拿货都站这儿）。临街那排的橱窗开口朝街，这格在屋外。
+static func front(inv: Inventory, loc: String, c: Vector2i) -> Vector2i:
+	return c + (Vector2i(0, 1) if facing(inv, loc, c) == "sw" else Vector2i(1, 0))
+
+
 static func walk_seconds(inv: Inventory, loc: String, from: Vector2i, target: Vector2i) -> float:
 	var n := steps_to(inv, loc, from, target)
 	return STEP_SECONDS * maxi(n, 0)

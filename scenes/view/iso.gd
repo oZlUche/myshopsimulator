@@ -308,7 +308,7 @@ static func draw_equipment(ci: CanvasItem, origin: Vector2, g: Vector2, kind: St
 		for i in maxi(1, int(extra.get("count", 1))):
 			draw_sprite(ci, origin, g, name, Color.WHITE, i * float(m["H"]))
 		return
-	draw_sprite(ci, origin, g, name)
+	draw_sprite(ci, origin, g, name, extra.get("col", Color.WHITE))
 	var tiers: Array = m.get("tiers", [])
 	var slot := Vector2(m["slot"][0], m["slot"][1]) if m.has("slot") else Vector2(0.5, 0.5)
 	if extra.has("tiers"):

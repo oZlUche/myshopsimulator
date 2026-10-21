@@ -43,14 +43,21 @@ func _foot(c: Vector2i, seed_value: int) -> Vector2:
 	return Vector2(c) + Vector2(0.5, 0.5) + j
 
 
-## 收银台前排队的格子：先是紧挨着收银台的，再往外一圈圈排。
+func _front_of(c: Vector2i) -> Vector2i:
+	return RoomGrid.front(inv, loc, c)
+
+
+## 收银台前排队的格子：先是收银台正前方那格，再从那里往外一圈圈排，不排到收银台后面（你站的那一侧）。
 func _counter_queue() -> Array:
 	var counter := inv.room_cell(loc, "counter")
 	var stand := inv.room_cell(loc, "stand")
 	var door := _door()
 	var out: Array = []
-	var seen := {counter: true, stand: true}
-	var q: Array = [counter]
+	var front := _front_of(counter)
+	var seen := {counter: true, stand: true, front: true}
+	var q: Array = [front]
+	if RoomGrid.walkable(inv, loc, front):
+		out.append(front)
 	while not q.is_empty() and out.size() < 8:
 		var c: Vector2i = q.pop_front()
 		for d in RoomGrid.DIRS:
@@ -59,12 +66,12 @@ func _counter_queue() -> Array:
 				continue
 			seen[n] = true
 			q.append(n)
-			if n != door:
+			if n != door and n.y >= counter.y:
 				out.append(n)
 	return out
 
 
-## 逛店时站的格子：展架、橱窗、模特旁边能站人的格。
+## 逛店时站的格子：展架、模特开口那一侧能站人的格；开口那侧站不了（比如橱窗朝街）才站旁边。
 func _browse_cells() -> Array:
 	var out: Array = []
 	var stand := inv.room_cell(loc, "stand")
@@ -73,8 +80,13 @@ func _browse_cells() -> Array:
 		if not e.has("pos"):
 			continue
 		var c := Vector2i(int(e["pos"][0]), int(e["pos"][1]))
-		for d in RoomGrid.DIRS:
-			var n: Vector2i = c + d
+		var front := _front_of(c)
+		var cands: Array = [front]
+		if not RoomGrid.walkable(inv, loc, front):
+			cands = []
+			for d in RoomGrid.DIRS:
+				cands.append(c + d)
+		for n in cands:
 			if n != stand and n != _door() and RoomGrid.walkable(inv, loc, n) and not out.has(n):
 				out.append(n)
 	return out
@@ -186,10 +198,13 @@ func _move(a: Dictionary, dt: float) -> void:
 			left = 0.0
 
 
-## 站定以后朝哪看：排队的看收银台，逛的看旁边的货架。
+## 站定以后朝哪看：排队的看收银台，逛的看开口朝着他的那个货架（没有就看旁边随便哪个）。
 func _look_dir(spot: Vector2i, v: Dictionary) -> Vector2:
 	if v["state"] in COUNTER_STATES:
 		return Vector2(inv.room_cell(loc, "counter") - spot)
+	for d in RoomGrid.DIRS:
+		if inv.equipment_at(loc, spot + d) != "" and _front_of(spot + d) == spot:
+			return Vector2(d)
 	for d in RoomGrid.DIRS:
 		var eid := inv.equipment_at(loc, spot + d)
 		if eid != "":
@@ -220,13 +235,18 @@ func _gui_input(e: InputEvent) -> void:
 func _collect_people(things: Array) -> void:
 	super._collect_people(things)
 	var t := Time.get_ticks_msec() / 1000.0
+	var you := Vector2i(player_g.round())
 	for id in _actors:
 		var a: Dictionary = _actors[id]
 		var fit := Iso.outfit_full(a["seed"])
 		var fc := Iso.facing_of(a.get("dir", a["look"]) if a.get("moving", false) else a["look"])
 		var v: Dictionary = a["v"]
 		var col := {"browsing": Color("#b8b5c4"), "asking": UIKit.ACCENT, "haggling": Color("#6fa8dc"), "waiting_item": UIKit.GOOD}.get(v["state"], Color.GRAY) as Color
-		things.append({"d": a["g"].x + a["g"].y, "kind": "person", "g": a["g"], "body": fit["top"], "hair": fit["hair"],
+		var g: Vector2 = a["g"]
+		# 你走到他站的那格拿货时，他往旁边让半步，别把你整个挡住
+		if not a.get("moving", false) and Vector2i(g.floor()) == you:
+			g += Vector2(-0.45, 0.25)
+		things.append({"d": g.x + g.y, "kind": "person", "g": g, "body": fit["top"], "hair": fit["hair"],
 			"style": fit["style"], "pants": fit["pants"], "scarf": fit["scarf"], "facing": fc[0], "back": fc[1],
 			"phase": t + a["seed"] * 0.1 if a.get("moving", false) else 0.0,
 			"tag": "#%d" % visitor_numbers.get(id, 0), "tag_color": col, "visitor": v})

@@ -16,7 +16,7 @@ const PREVIEW_CASH := 3000.0
 static func rent_rooms(s: GameState) -> void:
 	var inv := s.inventory
 	inv.add_room(SHOP, "Shop", SHOP_SIZE.x, SHOP_SIZE.y, {
-		"door": [3, 4], "stand": [6, 3], "counter": [5, 3], "traffic": ShopSession.DEFAULT_TRAFFIC, "rent_per_m2": 6.0})
+		"door": [3, 4], "stand": [5, 2], "counter": [5, 3], "traffic": ShopSession.DEFAULT_TRAFFIC, "rent_per_m2": 6.0})
 	inv.add_room(WAREHOUSE, "Warehouse", WAREHOUSE_SIZE.x, WAREHOUSE_SIZE.y, {
 		"door": [1, 4], "unload": [[2, 4], [3, 4]], "rent_per_m2": 2.0, "humidity": 0.55})
 	inv.install_equipment("shop_counter", SHOP, Vector2i(5, 3))

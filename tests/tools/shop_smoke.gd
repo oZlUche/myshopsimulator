@@ -187,6 +187,9 @@ func _init() -> void:
 								sh._on_top(sl.id)
 							else:
 								sh._take_to_hand(sl.id, at["index"], ActionAPI.CAREFUL_PULL)
+							# 让人走到位再拍（客人到柜台前排队，你走到货架前）
+							for i in 30:
+								sh._view.step(0.1)
 							await shot("s11_fetched")
 							var before = s.player.cash
 							sh._deliver(v)
