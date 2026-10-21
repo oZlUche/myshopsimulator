@@ -26,3 +26,8 @@ jobs:
           ./godot --headless --path . --script res://tests/tools/ui_smoke.gd 2>&1 | tee ui.log
           grep -q "UI_SMOKE PASS" ui.log
           ! grep -q "SCRIPT ERROR" ui.log
+      - name: Art showcase (draws every sprite and equipment once)
+        run: |
+          ./godot --headless --path . --script res://tests/tools/art_showcase.gd 2>&1 | tee art.log
+          grep -q "ART_SHOWCASE PASS" art.log
+          ! grep -q "SCRIPT ERROR" art.log

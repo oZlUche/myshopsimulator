@@ -243,3 +243,95 @@ static func outfit_full(seed_value: int) -> Dictionary:
 		"style": (s / 31) % HAIR_STYLES,
 		"scarf": scarf,
 	}
+
+
+# ---------------------------------------------------------------- 设备（店面 / 仓库，01 §4.9）
+## 设备精灵由 tools/pixelart/gen_equipment.py 生成，元数据在 assets/sprites/equipment.json：
+## size 图的美术像素尺寸、anchor 地面菱形最上角在图里的位置、H 高度（美术像素）、tiers 每层层板高度、slot 放货的格内偏移。
+
+static var _equip_meta: Dictionary = {}
+static var _tex_cache: Dictionary = {}
+
+
+static func sprite_meta(name: String) -> Dictionary:
+	if _equip_meta.is_empty():
+		var f := FileAccess.open("res://assets/sprites/equipment.json", FileAccess.READ)
+		if f:
+			var parsed: Variant = JSON.parse_string(f.get_as_text())
+			if parsed is Dictionary:
+				_equip_meta = parsed
+	return _equip_meta.get(name, {})
+
+
+static func sprite_tex(name: String) -> Texture2D:
+	if not _tex_cache.has(name):
+		_tex_cache[name] = load("res://assets/sprites/%s.png" % name)
+	return _tex_cache[name]
+
+
+## 画一张带锚点的精灵：地面菱形最上角对到格坐标 g，再往上抬 up 个美术像素（放在层板上用）。
+static func draw_sprite(ci: CanvasItem, origin: Vector2, g: Vector2, name: String, col := Color.WHITE, up := 0.0) -> void:
+	var m := sprite_meta(name)
+	var tex := sprite_tex(name)
+	if m.is_empty() or tex == null:
+		return
+	var anchor := Vector2(m["anchor"][0], m["anchor"][1])
+	var size := Vector2(m["size"][0], m["size"][1])
+	var p := snap(to_screen(g, origin)) - (anchor + Vector2(0, up)) * PX
+	ci.draw_texture_rect(tex, Rect2(p, size * PX), false, col)
+
+
+## 设备的高度（屏幕像素，和 draw_box 的 h 一个单位），排序 / 遮挡用。
+static func equipment_height(kind: String, facing := "sw") -> float:
+	var m := sprite_meta(_equip_name(kind, facing))
+	return float(m.get("H", 0)) * PX
+
+
+static func _equip_name(kind: String, facing: String) -> String:
+	if kind in ["mannequin", "carton", "bag"]:
+		return "eq_" + kind
+	return "eq_%s_%s" % [kind, facing]
+
+
+## 画一件设备，占地 1×1 格（手推车 0.9×0.7），g 是它占的那格。
+## kind：shop_shelf 货架 / shop_cabinet 货柜 / shop_window 橱窗 / mannequin 模特 / shop_counter 收银台 /
+##       warehouse_rack 仓库货架 / carton 纸箱 / bag 整包 / handcart 手推车
+## facing：开口朝 "sw"（左前）还是 "se"（右前）。
+## extra：tiers = [[每层从下往上各份围巾的颜色], ...]（货架、橱窗）；scarf = 模特身上围巾的颜色；
+##        boxes / bags = [每层的箱数 / 包数]（仓库货架，每层 2 箱或 6 包）；count = 地堆纸箱摞几个。
+static func draw_equipment(ci: CanvasItem, origin: Vector2, g: Vector2, kind: String, facing := "sw", extra := {}) -> void:
+	var name := _equip_name(kind, facing)
+	var m := sprite_meta(name)
+	if m.is_empty():
+		return
+	if kind == "carton":
+		for i in maxi(1, int(extra.get("count", 1))):
+			draw_sprite(ci, origin, g, name, Color.WHITE, i * float(m["H"]))
+		return
+	draw_sprite(ci, origin, g, name)
+	var tiers: Array = m.get("tiers", [])
+	var slot := Vector2(m["slot"][0], m["slot"][1]) if m.has("slot") else Vector2(0.5, 0.5)
+	if extra.has("tiers"):
+		var fold := "fold_" + facing
+		var fh := float(sprite_meta(fold).get("H", 3))
+		for k in mini(tiers.size(), extra["tiers"].size()):
+			var i := 0
+			for c in extra["tiers"][k]:
+				draw_sprite(ci, origin, g + slot, fold, c, float(tiers[k]) + i * fh)
+				i += 1
+	if extra.has("boxes"):
+		for k in mini(tiers.size(), extra["boxes"].size()):
+			for i in int(extra["boxes"][k]):
+				var off := Vector2(0.5 * i, 0) if facing == "sw" else Vector2(0, 0.5 * i)
+				draw_sprite(ci, origin, g + slot + off, "eq_carton_small_" + facing, Color.WHITE, float(tiers[k]))
+	if extra.has("bags"):
+		for k in mini(tiers.size(), extra["bags"].size()):
+			for i in int(extra["bags"][k]):
+				var a := i % 3
+				var b := i / 3
+				var off := Vector2(0.3 * a, 0.45 * b) if facing == "sw" else Vector2(0.45 * b, 0.3 * a)
+				draw_sprite(ci, origin, g + slot + off, "eq_bag", Color.WHITE, float(tiers[k]))
+	if kind == "shop_window":
+		draw_sprite(ci, origin, g, "eq_shop_window_glass_" + facing)
+	if kind == "mannequin" and extra.has("scarf"):
+		draw_sprite(ci, origin, g, "eq_mannequin_scarf", extra["scarf"])

@@ -449,6 +449,8 @@ def generate():
     write(shadow(), "shadow")
     for k in ["ask", "haggle", "wait"]:
         write(bubble(k), "bubble_" + k)
+    import gen_equipment
+    gen_equipment.generate(OUT)
     print("wrote sprites to", OUT)
 
 
