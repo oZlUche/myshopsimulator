@@ -34,6 +34,8 @@ var _fit_acc := 0.0
 ## 计时器到点了：下一位过路客按摊上实际摆着的货生成
 var _fit_pending := false
 var _returning: Array[CustomerProfile] = []
+## 景气对客流的修正 0.7 + 0.3·G（09 §3.3），一旬里不变
+var _traffic_mult := 1.0
 
 
 func _init(state: GameState, stall_x: float, returning: Variant = null) -> void:
@@ -46,6 +48,7 @@ func _init(state: GameState, stall_x: float, returning: Variant = null) -> void:
 		_returning = s.customers.roll_returning(s.rng)
 	else:
 		_returning.assign(returning)
+	_traffic_mult = 0.7 + 0.3 * float(s.econ_now()["G"])
 
 
 ## 这一旬还没回来的常客（店面和仓库来回跑时要接着用，别让同一个常客回来两次）。
@@ -73,7 +76,7 @@ func slot_title(sl: Slot) -> String:
 	return "摊位 %d" % (display_slots().find(sl) + 1)
 
 
-## 每秒新来多少过路客。
+## 每秒新来多少过路客（景气修正在 tick 里乘）。
 func spawn_rate(t: float) -> float:
 	var width := float(area_radius() * 2 + 1)
 	return s.street.density(x, t) * width * TRAFFIC_SCALE
@@ -101,7 +104,7 @@ func tick(dt: float) -> void:
 	if is_over():
 		return
 	s.clock.time_of_period = minf(1.0, s.clock.time_of_period + dt / PERIOD_SECONDS)
-	_spawn_acc += spawn_rate(s.clock.time_of_period) * dt
+	_spawn_acc += spawn_rate(s.clock.time_of_period) * _traffic_mult * dt
 	_fit_acc += dt
 	if _fit_acc >= fit_interval():
 		_fit_acc = 0.0
@@ -111,7 +114,9 @@ func tick(dt: float) -> void:
 		_passerby()
 	# 常客在旬内随机时刻回来
 	if not _returning.is_empty() and s.rng.chance(dt / PERIOD_SECONDS * 3.0):
-		_consider(_returning.pop_back(), true)
+		var c: CustomerProfile = _returning.pop_back()
+		c.apply_economy(s.econ_now())
+		_consider(c, true)
 	for v in visitors.duplicate():
 		if v["state"] == "haggling":
 			continue
@@ -387,7 +392,7 @@ func start_haggle(v: Dictionary) -> HaggleState:
 
 
 func price_of(sku_id: String) -> float:
-	return float(s.stall["prices"].get(sku_id, DataDB.sku(sku_id)["base_price"]))
+	return float(s.stall["prices"].get(sku_id, s.list_price(sku_id)))
 
 
 ## 这份货的成本价（01 §6.4）：玩家自己的账，直接读真相层的进价记录，不受技能影响。
@@ -399,7 +404,7 @@ func cost_of(item_id: String, sku_id: String) -> Dictionary:
 	for e in s.supplier_catalog:
 		if e["sku_id"] == sku_id:
 			return {"cost": float(e["unit_price"]), "estimated": true}
-	return {"cost": float(DataDB.sku(sku_id).get("base_cost", 0.0)) * 1.175, "estimated": true}
+	return {"cost": float(DataDB.sku(sku_id).get("base_cost", 0.0)) * 1.175 * s.economy.price_level, "estimated": true}
 
 
 ## 议价结束。成交 → 客人等你拿货（waiting_item），不自动出货；没谈成 → 离开。

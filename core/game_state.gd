@@ -44,6 +44,16 @@ func econ_now() -> Dictionary:
 	return economy.effective(clock.period)
 
 
+## 默认标价：表里的 base_price 是实际值，乘当前物价水平 π 取整（09 §1.2）。
+func list_price(sku_id: String) -> float:
+	return snappedf(float(DataDB.sku(sku_id)["base_price"]) * economy.price_level, 1.0)
+
+
+## 设备表价也是实际值，买卖时乘 π（01 §4.9、09 §7）。
+func equipment_price(def_id: String) -> float:
+	return snappedf(float(DataDB.equipment().get(def_id, {}).get("price", 0.0)) * economy.price_level, 1.0)
+
+
 func trend_now() -> Dictionary:
 	return trend.effective(clock.period)
 

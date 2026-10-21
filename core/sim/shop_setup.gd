@@ -37,7 +37,7 @@ static func start_preview(s: GameState) -> void:
 	inv.install_equipment("warehouse_rack", WAREHOUSE, Vector2i(1, 0))
 	inv.install_equipment("hand_cart", "player")
 	var lines := preview_order(s)
-	var boxes := Wholesale.make_shipment(inv, lines, s.trend_now()["color"], s.rng, s.clock.period)
+	var boxes := Wholesale.make_shipment(inv, lines, s.trend_now()["color"], s.rng, s.clock.period, s.econ_now())
 	var unload: Array = inv.locations[WAREHOUSE]["unload"]
 	for i in boxes.size():
 		var cell: Array = unload[mini(i / 4, unload.size() - 1)]
@@ -53,7 +53,7 @@ static func start_preview(s: GameState) -> void:
 		b.waybill["weight"] = Wholesale.box_weight(b)
 	for it in inv.all_items():
 		if not s.stall["prices"].has(it.sku_id):
-			s.stall["prices"][it.sku_id] = float(DataDB.sku(it.sku_id)["base_price"])
+			s.stall["prices"][it.sku_id] = s.list_price(it.sku_id)
 
 
 ## 预览那批货：按眼下流行的图案、本季的材质挑 6 款，单色、混色各半，每款 10 包 → 6 箱。

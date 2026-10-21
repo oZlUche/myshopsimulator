@@ -453,7 +453,8 @@ func sell(slot_id: String, index: int, price: float, customer: CustomerProfile, 
 ## 一份已经拿在手里（离开货堆）的货卖给客人：收钱、记账、回购率（客人自取也走这里）。
 func sell_item(item: ScarfItem, price: float, customer: CustomerProfile, reserve: float) -> void:
 	s.player.cash += price
-	var base_price := float(DataDB.sku(item.sku_id)["base_price"])
+	# 成交价比按实际值算（除掉物价 π），否则通胀会经由 C 项推高景气（09 §1.2）
+	var base_price := float(DataDB.sku(item.sku_id)["base_price"]) * s.economy.price_level
 	s.period_stats["sales"] = int(s.period_stats["sales"]) + 1
 	s.period_stats["revenue"] = float(s.period_stats["revenue"]) + price
 	s.period_stats["cost_of_goods"] = float(s.period_stats["cost_of_goods"]) + float(item.provenance.get("unit_cost", 0.0))
@@ -500,7 +501,7 @@ func buy_equipment(def_id: String, location_id: String, pos := Vector2i(-1, -1))
 		var why := RoomGrid.can_place(s.inventory, location_id, def_id, pos)
 		if why != "":
 			return {"ok": false, "reason": why}
-	var price := float(def.get("price", 0.0))
+	var price := s.equipment_price(def_id)
 	if price > s.player.cash + 0.0001:
 		return {"ok": false, "reason": "现金不够"}
 	s.player.cash -= price
@@ -536,7 +537,7 @@ func sell_equipment(eid: String) -> Dictionary:
 		return {"ok": false, "reason": "这个卖不了"}
 	if not s.inventory.remove_equipment(eid):
 		return {"ok": false, "reason": "上面还有货，先清空"}
-	var refund := float(def.get("price", 0.0)) * float(def.get("resale_ratio", 0.0))
+	var refund := s.equipment_price(e["def_id"]) * float(def.get("resale_ratio", 0.0))
 	s.player.cash += refund
 	s.knowledge.add_ledger(s.clock.period, "equipment", refund, "卖掉" + def.get("name", e["def_id"]))
 	return {"ok": true, "refund": refund}

@@ -445,7 +445,7 @@ func _refresh_haggle() -> void:
 	var c := _haggle.customer
 	var num: int = _area.visitor_numbers.get(c.id, 0)
 	_haggle_box.add_child(UIKit.label("客人 #%d%s" % [num, "（常客）" if c.is_regular else ""], 16, UIKit.ACCENT))
-	var hint := Sampler.customer_hint(c, s.player, _haggle.perceived_sku, _haggle.patience_left)
+	var hint := Sampler.customer_hint(c, s.player, _haggle.perceived_sku, _haggle.patience_left, s.economy.price_level)
 	var hint_lines: Array = []
 	for key in ["preference", "patience", "budget", "strategy", "loyalty"]:
 		if hint.has(key):
