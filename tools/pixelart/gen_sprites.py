@@ -328,14 +328,16 @@ def ground_tile(kind, variant, rng):
         "tile": [(190, 184, 172), (176, 170, 158), (204, 198, 186), (140, 134, 124)],
     }[kind]
     shade = lambda c, k: tuple(max(0, min(255, int(ch * (1 + k)))) for ch in c)
-    # 仓库水泥地：一格一块大板，左上两条边是伸缩缝（右下两条边由邻格提供）；花色 1 多一块淡污渍和一道细裂缝
+    # 仓库水泥地：一格一块大板，左上两条边是伸缩缝（右下两条边由邻格提供）；
+    # 四张花色分工：0 素面、1 一道细裂缝、2 一块淡污渍、3 素面（只换噪点），铺开后不会看出重复
     stains, crack = set(), set()
-    if kind == "concrete" and variant == 1:
+    if kind == "concrete" and variant == 2:
         cx, cy = rng.randrange(8, TW - 8), rng.randrange(4, TH - 4)
         for dy in range(-2, 3):
             for dx in range(-4, 5):
                 if (dx / 4.5) ** 2 + (dy / 2.5) ** 2 < 1:
                     stains.add((cx + dx, cy + dy))
+    if kind == "concrete" and variant == 1:
         x, y = rng.randrange(8, TW - 14), rng.randrange(4, TH - 4)
         for _ in range(7):
             crack.add((x, y))
@@ -379,7 +381,7 @@ def ground_tile(kind, variant, rng):
                 if u < 0.07 or v < 0.07:
                     c = pal[1]                                   # 伸缩缝
                 elif (x, y) in stains and r >= 0.135:
-                    c = shade(pal[0], -0.05)
+                    c = shade(pal[0], -0.04)
                 if (x, y) in crack:
                     c = pal[3]
             elif kind == "tile":
@@ -512,6 +514,10 @@ def generate():
     rng = random.Random(7)
     for kind in ["pavement", "road", "grass", "lot", "concrete", "wood", "tile"]:
         for v in range(2):
+            write(ground_tile(kind, v, rng), "tile_%s_%d" % (kind, v))
+    # 花色 2、3 在所有花色 0、1 之后生成，随机序列接着走，前面的图不受影响
+    for kind in ["pavement", "road", "grass", "lot", "concrete", "wood", "tile"]:
+        for v in range(2, 4):
             write(ground_tile(kind, v, rng), "tile_%s_%d" % (kind, v))
     write(kerb_tile("nw"), "kerb_nw")
     write(kerb_tile("se"), "kerb_se")

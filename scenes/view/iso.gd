@@ -83,12 +83,13 @@ static func draw_tile(ci: CanvasItem, origin: Vector2, g: Vector2, col: Color, w
 		ci.draw_polyline(pts, outline, PX)
 
 
-## 一格地面贴图。kind：pavement 人行道 / road 街面 / grass 花坛 / lot 空地 / concrete 仓库水泥地 / wood 店面木地板 / tile 店面瓷砖；variant 换一张花色。
+## 一格地面贴图。kind：pavement 人行道 / road 街面 / grass 花坛 / lot 空地 / concrete 仓库水泥地 / wood 店面木地板 / tile 店面瓷砖；
+## variant 换一张花色（每种 4 张，内部取模，传任意整数即可，比如 gx * 5 + gy * 11）。
 ## kerb 为 "nw" / "se" 时在这格靠那条边上叠一道路缘石（人行道挨着街的那条边）。
 static func draw_ground(ci: CanvasItem, origin: Vector2, g: Vector2, kind: String, variant := 0, kerb := "") -> void:
 	if not kind in ["pavement", "road", "grass", "lot", "concrete", "wood", "tile"]:
 		kind = "pavement"
-	var tex := sprite_tex("tile_%s_%d" % [kind, absi(variant) % 2])
+	var tex := sprite_tex("tile_%s_%d" % [kind, absi(variant) % 4])
 	var p := snap(to_screen(g, origin) - Vector2(TW * 0.5, 0))
 	ci.draw_texture_rect(tex, Rect2(p, Vector2(TW, TH)), false)
 	if kerb == "nw" or kerb == "se":

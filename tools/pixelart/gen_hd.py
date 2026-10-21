@@ -258,15 +258,16 @@ def ground_tile(kind, variant, rng):
         "tile": [(190, 184, 172), (176, 170, 158), (204, 198, 186), (140, 134, 124)],
     }[kind]
     slab_tone = {(a, b): rng.uniform(-0.04, 0.04) for a in range(2) for b in range(2)}
-    # 水泥地：一格一块大板带伸缩缝；花色 1 多一块两层的淡污渍和一道带分叉的裂缝
+    # 水泥地：一格一块大板带伸缩缝；四张花色分工同标清：0 素面、1 带分叉的裂缝、2 两层的淡污渍、3 素面
     stain_in, stain_out, crack = set(), set(), set()
-    if kind == "concrete" and variant == 1:
+    if kind == "concrete" and variant == 2:
         cx, cy = rng.randrange(14, TW - 14), rng.randrange(7, TH - 7)
         for dy in range(-5, 6):
             for dx in range(-9, 10):
                 d = (dx / 9.5) ** 2 + (dy / 5.5) ** 2
                 if d < 1:
                     (stain_in if d < 0.45 else stain_out).add((cx + dx, cy + dy))
+    if kind == "concrete" and variant == 1:
         x, y = rng.randrange(16, TW - 28), rng.randrange(8, TH - 8)
         for n in range(14):
             crack.add((x, y))
@@ -332,9 +333,9 @@ def ground_tile(kind, variant, rng):
                     c = shade(c, 0.04)                           # 缝边一点倒角
                 elif r >= 0.09:
                     if (x, y) in stain_in:
-                        c = shade(pal[0], -0.07)
+                        c = shade(pal[0], -0.045)
                     elif (x, y) in stain_out:
-                        c = shade(pal[0], -0.04)
+                        c = shade(pal[0], -0.025)
                 if (x, y) in crack:
                     c = pal[3]
                 elif (x, y - 1) in crack:
@@ -500,6 +501,9 @@ def generate(out):
     rng = random.Random(11)
     for kind in ["pavement", "road", "grass", "lot", "concrete", "wood", "tile"]:
         for v in range(2):
+            write(ground_tile(kind, v, rng), "tile_%s_%d" % (kind, v))
+    for kind in ["pavement", "road", "grass", "lot", "concrete", "wood", "tile"]:
+        for v in range(2, 4):
             write(ground_tile(kind, v, rng), "tile_%s_%d" % (kind, v))
     write(kerb_tile("nw"), "kerb_nw")
     write(kerb_tile("se"), "kerb_se")
