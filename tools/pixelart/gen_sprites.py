@@ -323,7 +323,34 @@ def ground_tile(kind, variant, rng):
         "road": [(92, 90, 101), (84, 82, 93), (102, 100, 112), (70, 68, 78)],
         "grass": [(66, 94, 60), (78, 110, 68), (56, 82, 52), (48, 70, 46)],
         "lot": [(60, 63, 53), (53, 56, 47), (68, 71, 60), (46, 49, 41)],
+        "concrete": [(118, 117, 112), (108, 107, 102), (128, 127, 121), (96, 95, 90)],
+        "wood": [(178, 140, 98), (156, 118, 78), (196, 160, 118), (112, 80, 52)],
+        "tile": [(190, 184, 172), (176, 170, 158), (204, 198, 186), (140, 134, 124)],
     }[kind]
+    shade = lambda c, k: tuple(max(0, min(255, int(ch * (1 + k)))) for ch in c)
+    # 仓库水泥地：一格一块大板，左上两条边是伸缩缝（右下两条边由邻格提供）；花色 1 多一块淡污渍和一道细裂缝
+    stains, crack = set(), set()
+    if kind == "concrete" and variant == 1:
+        cx, cy = rng.randrange(8, TW - 8), rng.randrange(4, TH - 4)
+        for dy in range(-2, 3):
+            for dx in range(-4, 5):
+                if (dx / 4.5) ** 2 + (dy / 2.5) ** 2 < 1:
+                    stains.add((cx + dx, cy + dy))
+        x, y = rng.randrange(8, TW - 14), rng.randrange(4, TH - 4)
+        for _ in range(7):
+            crack.add((x, y))
+            x += 1
+            y += rng.choice((-1, 0, 0, 1))
+    # 店面木地板：板子沿 gx 方向铺，一格里 4 块板（v 每 0.25 一块）；板缝在每块板靠 v 小的那条边，
+    # 一半的板头接缝落在格的左上边、一半落在格中间，每块板再来一道木纹
+    planks = []
+    if kind == "wood":
+        for i in range(4):
+            planks.append({
+                "tone": rng.uniform(-0.025, 0.025),
+                "seam": 0.0 if rng.random() < 0.5 else rng.uniform(0.3, 0.7),
+                "grain": (i / 4 + rng.uniform(0.08, 0.16), rng.uniform(0.0, 0.45), rng.uniform(0.55, 1.0)),
+            })
     for y in range(TH):
         for x in range(TW):
             if not iso_inside(x, y):
@@ -347,6 +374,36 @@ def ground_tile(kind, variant, rng):
                 c = pal[1] if r < 0.16 else (pal[2] if r < 0.24 else (pal[3] if r < 0.27 else pal[0]))
                 if r > 0.994:
                     c = rng.choice([(222, 96, 116), (242, 222, 120), (232, 232, 242)])
+            elif kind == "concrete":
+                c = pal[2] if r < 0.04 else (pal[1] if r < 0.12 else (pal[3] if r < 0.135 else pal[0]))
+                if u < 0.07 or v < 0.07:
+                    c = pal[1]                                   # 伸缩缝
+                elif (x, y) in stains and r >= 0.135:
+                    c = shade(pal[0], -0.05)
+                if (x, y) in crack:
+                    c = pal[3]
+            elif kind == "tile":
+                # 店面瓷砖：一格 2×2 块，缝细、面干净，每块靠上两条边有一道亮边（釉面反光）
+                if u < 0.07 or v < 0.07 or abs(u - 0.5) < 0.035 or abs(v - 0.5) < 0.035:
+                    c = pal[3]
+                elif (0.07 <= u % 0.5 < 0.13) or (0.07 <= v % 0.5 < 0.13):
+                    c = pal[2]
+                elif r < 0.03:
+                    c = pal[1]
+            elif kind == "wood":
+                i = min(3, int(v * 4))
+                pk = planks[i]
+                c = shade(pal[0], pk["tone"])
+                if (v < 0.07 if i == 0 else abs(v - i / 4) < 0.035):
+                    c = pal[3]                                   # 板缝
+                elif (u < 0.07 if pk["seam"] == 0.0 else abs(u - pk["seam"]) < 0.035):
+                    c = pal[3]                                   # 板头接缝
+                elif abs(v - pk["grain"][0]) < 0.035 and pk["grain"][1] < u < pk["grain"][2]:
+                    c = pal[1]                                   # 木纹
+                elif r < 0.04:
+                    c = pal[1]
+                elif r < 0.06:
+                    c = pal[2]
             else:
                 c = pal[1] if r < 0.15 else (pal[2] if r < 0.2 else (pal[3] if r < 0.24 else pal[0]))
             img.putpixel((x, y), c + (255,))
@@ -453,7 +510,7 @@ def generate():
     for k, img in sheets.items():
         write(img, "person_" + k if k != "hair" else "hair")
     rng = random.Random(7)
-    for kind in ["pavement", "road", "grass", "lot"]:
+    for kind in ["pavement", "road", "grass", "lot", "concrete", "wood", "tile"]:
         for v in range(2):
             write(ground_tile(kind, v, rng), "tile_%s_%d" % (kind, v))
     write(kerb_tile("nw"), "kerb_nw")

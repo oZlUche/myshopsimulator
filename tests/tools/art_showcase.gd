@@ -21,8 +21,10 @@ class Showcase extends Control:
 					kind = "road"
 				elif gy == 1:
 					kerb = "nw"
-				elif gy >= 7:
+				elif gy == 7:
 					kind = "grass" if gx < 6 else "lot"
+				elif gy >= 8:
+					kind = "concrete" if gx < 4 else ("wood" if gx < 8 else "tile")
 				Iso.draw_ground(self, o, Vector2(gx, gy), kind, gx * 7 + gy * 13, kerb)
 		var red := Color("#c0392b")
 		var navy := Color("#22315a")
