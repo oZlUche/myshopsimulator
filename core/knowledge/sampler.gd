@@ -66,20 +66,23 @@ static func memory_tooltip(k: Knowledge, slot_id: String, player: PlayerState) -
 	return "、".join(order)
 
 
-## 翻看（03 §3）：纯色几乎不认错；图案款可能被认成同色同材质的其他图案款。
+## 翻看（03 §3）：按图案相似度表（与 06 §2 客人看货共用）可能认成同色同材质的别的图案款。
+## 纯色几乎不认错，格纹 / 条纹、碎花 / 波点之间最容易看混。
 static func peek(item: ScarfItem, rng: GameRng) -> Dictionary:
 	var s := DataDB.sku(item.sku_id)
 	var a := DataDB.attributes()
 	var confusable: bool = a["patterns"][s["pattern"]].get("confusable", false)
-	var p_confuse := 0.18 if confusable else 0.01
+	var conf := AttrDistance.pattern_confusion(s["pattern"])
+	var p_confuse := 0.0
+	for q in conf:
+		p_confuse += float(conf[q])
 	var guess := item.sku_id
-	if rng.chance(p_confuse):
-		var candidates: Array = []
-		for p in a["patterns"]:
-			if p != s["pattern"] and (confusable == a["patterns"][p].get("confusable", false)):
-				candidates.append("scarf_%s_%s_%s" % [p, s["color"], s["material"]])
-		if not candidates.is_empty():
-			guess = rng.pick(candidates)
+	var roll := rng.randf()
+	for q in conf:
+		roll -= float(conf[q])
+		if roll < 0.0:
+			guess = "scarf_%s_%s_%s" % [q, s["color"], s["material"]]
+			break
 	return {"sku_guess": guess, "confidence": 1.0 - p_confuse, "may_be_wrong": confusable}
 
 

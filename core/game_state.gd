@@ -56,7 +56,7 @@ func world_flags() -> Dictionary:
 func reset_period_stats() -> void:
 	period_stats = {"traffic": 0, "stayed": 0, "sales": 0, "revenue": 0.0, "cost_of_goods": 0.0,
 		"price_ratio_sum": 0.0, "purchases": 0.0, "collapses": 0, "xp_earned": 0.0, "ignored": 0,
-		"undelivered": 0}
+		"no_match": 0, "scared_off": 0, "lost_after_deal": 0}
 
 
 func to_dict() -> Dictionary:

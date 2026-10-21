@@ -1,14 +1,14 @@
 {
 	"_comment": "围巾 SKU 由 图案 × 颜色 × 材质 组合生成，ID 形如 scarf_<pattern>_<color>_<material>。ID 是稳定字符串，改顺序不影响存档。",
 	"colors": {
-		"red": {"name": "红", "rgb": "#c0392b"},
-		"navy": {"name": "藏青", "rgb": "#22315a"},
-		"beige": {"name": "米", "rgb": "#e6d5b8"},
-		"black": {"name": "黑", "rgb": "#1e1e1e"},
-		"grey": {"name": "灰", "rgb": "#8a8a8a"},
-		"purple": {"name": "紫", "rgb": "#7d3c98"},
-		"green": {"name": "墨绿", "rgb": "#1e5631"},
-		"camel": {"name": "驼", "rgb": "#b5835a"}
+		"red": {"name": "红", "rgb": "#c0392b", "hue": 5, "light": 0.45, "chroma": 0.75},
+		"navy": {"name": "藏青", "rgb": "#22315a", "hue": 225, "light": 0.22, "chroma": 0.45},
+		"beige": {"name": "米", "rgb": "#e6d5b8", "hue": 40, "light": 0.85, "chroma": 0.2},
+		"black": {"name": "黑", "rgb": "#1e1e1e", "hue": 0, "light": 0.08, "chroma": 0},
+		"grey": {"name": "灰", "rgb": "#8a8a8a", "hue": 0, "light": 0.54, "chroma": 0},
+		"purple": {"name": "紫", "rgb": "#7d3c98", "hue": 285, "light": 0.4, "chroma": 0.55},
+		"green": {"name": "墨绿", "rgb": "#1e5631", "hue": 140, "light": 0.23, "chroma": 0.5},
+		"camel": {"name": "驼", "rgb": "#b5835a", "hue": 28, "light": 0.53, "chroma": 0.4}
 	},
 	"patterns": {
 		"solid": {"name": "纯色", "price_mult": 1.0, "confusable": false},
@@ -25,6 +25,37 @@
 		"wool": {"name": "羊毛", "base_cost": 40, "weight": 1.6},
 		"cashmere": {"name": "羊绒", "base_cost": 90, "weight": 1.4},
 		"knit": {"name": "加厚针织", "base_cost": 30, "weight": 2.0}
+	},
+	"_comment_similarity": "客人行为与议价（06 §2）：图案 / 材质两两相似度 0..1，键为 a|b（不分顺序），未列出的组合为 0、自身为 1。图案相似度同时驱动翻看认错概率（03 §3）。颜色距离按 hue（色相角）、light（明度）、chroma（彩度）算。",
+	"pattern_similarity": {
+		"plaid|stripe": 0.6,
+		"floral|dot": 0.5,
+		"stripe|dot": 0.3,
+		"solid|dot": 0.25,
+		"plaid|floral": 0.2,
+		"plaid|dot": 0.2,
+		"stripe|floral": 0.15,
+		"solid|stripe": 0.15,
+		"solid|plaid": 0.05,
+		"solid|floral": 0.05
+	},
+	"material_similarity": {
+		"silk|ice_silk": 0.7,
+		"wool|cashmere": 0.7,
+		"ice_silk|chiffon": 0.55,
+		"wool|knit": 0.55,
+		"silk|chiffon": 0.5,
+		"cashmere|knit": 0.4,
+		"cotton_linen|chiffon": 0.3,
+		"cotton_linen|silk": 0.25,
+		"cotton_linen|ice_silk": 0.25,
+		"cotton_linen|knit": 0.25,
+		"cotton_linen|wool": 0.2,
+		"cotton_linen|cashmere": 0.15,
+		"silk|cashmere": 0.1,
+		"chiffon|knit": 0.05,
+		"silk|wool": 0.05,
+		"ice_silk|wool": 0.05
 	},
 	"retail_markup": 2.2,
 	"season_material_baseline": {
