@@ -7,7 +7,7 @@ extends RefCounted
 ## - 写档前旧档改名为 .bak；任何失败都不覆盖原档。
 
 ## 每次改存档结构 +1，并且：新增迁移脚本、登记到 Migrations.REGISTRY、新增 tests/save_fixtures/ 下的一份存档。
-const CURRENT_SCHEMA_VERSION := 1
+const CURRENT_SCHEMA_VERSION := 2
 
 ## 这些路径下是"集合"（以 ID 为键的字典）：条目被删除就该消失，合并时不从旧档补回。
 const COLLECTION_PATHS := [

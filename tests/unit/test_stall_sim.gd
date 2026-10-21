@@ -61,4 +61,4 @@ func test_haggle_never_sells_above_reserve_by_offer() -> void:
 	var h := HaggleState.start(c, "scarf_solid_red_wool", 9999.0)
 	for i in 10:
 		h.offer_price(9999.0, rng)
-	assert_eq(h.result, "walked_away", "远超心理价不应成交")
+	assert_true(h.result != "deal", "远超心理价不应成交：%s" % h.result)

@@ -121,11 +121,18 @@ func _init() -> void:
 			break
 	st._refresh_all()
 	await shot("4_stall_haggle")
-	st._haggle.offer_price(st._haggle.asking_price, s.rng)
+	# 先用一招说服（按钮行），再报个低价保证谈成（P 模型下报高可能吓跑）
+	st._haggle.use_strategy("color", s.rng)
 	st._after_haggle_step()
 	await shot("5_haggle_step")
-	st._haggle.accept_customer_offer()
+	assert(st._haggle.result == "ongoing" or st._haggle.result == "deal", "一招之后不该就走：%s" % st._haggle.result)
+	if st._haggle.result == "ongoing":
+		if st._haggle.customer_offer > 0.0:
+			st._haggle.accept_customer_offer()
+		else:
+			st._haggle.offer_price(1.0, s.rng)
 	st._refresh_haggle()
+	assert(st._haggle.result == "deal", "低价应谈成：%s" % st._haggle.result)
 	var buyer = st._haggle_visitor
 	st._end_haggle()
 	assert(buyer["state"] == "waiting_item", "谈成后应等你拿货，不自动出货：%s" % buyer["state"])

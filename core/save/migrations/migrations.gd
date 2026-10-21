@@ -5,4 +5,6 @@ extends RefCounted
 ## 新增示例：
 ##   const REGISTRY := {1: preload("res://core/save/migrations/m_0001_to_0002.gd")}
 
-const REGISTRY := {}
+const REGISTRY := {
+	1: preload("res://core/save/migrations/m_0001_to_0002.gd"),
+}

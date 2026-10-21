@@ -282,6 +282,13 @@ func sell(slot_id: String, index: int, price: float, customer: CustomerProfile, 
 	var item: ScarfItem = r["item"]
 	if item == null:
 		return {"ok": false}
+	sell_item(item, price, customer, reserve)
+	r["ok"] = true
+	return r
+
+
+## 一份已经拿在手里（离开货堆）的货卖给客人：收钱、记账、回购率（客人自取也走这里）。
+func sell_item(item: ScarfItem, price: float, customer: CustomerProfile, reserve: float) -> void:
 	s.player.cash += price
 	var base_price := float(DataDB.sku(item.sku_id)["base_price"])
 	s.period_stats["sales"] = int(s.period_stats["sales"]) + 1
@@ -292,8 +299,6 @@ func sell(slot_id: String, index: int, price: float, customer: CustomerProfile, 
 	s.knowledge.add_ledger(s.clock.period, "sale", price, DataDB.sku_display_name(item.sku_id))
 	s.bus.emit("sale", {"item_id": item.id, "sku_id": item.sku_id, "price": price, "customer_id": customer.id})
 	_xp(4.0 + price * 0.05)
-	r["ok"] = true
-	return r
 
 
 ## 收摊：摊位上的货（含地上的）全部收回行囊。返回装不下而被丢掉的件数。

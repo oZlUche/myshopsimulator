@@ -1,22 +1,36 @@
 class_name AutoSeller
 extends RefCounted
-## 无界面模拟用的议价策略：先报标价，逐轮向客人出价让步，低于成本 +10% 不卖。
-## 也是将来员工代卖（02 / 01 §6.5）的雏形。
+## 无界面模拟用的议价策略：先把说真话的策略用掉（真货比客人看到的更合他意），
+## 再从标价起逐轮向客人还价让步，低于成本 +10% 不卖。也是将来员工代卖（02 / 01 §6.5）的雏形。
 
 
 static func run(h: HaggleState, unit_cost: float, rng: GameRng) -> void:
 	var floor_price := unit_cost * 1.1
-	h.offer_price(h.asking_price, rng)
 	var guard := 0
-	while h.result == "ongoing" and guard < 6:
+	while h.result == "ongoing" and guard < 16:
 		guard += 1
-		if h.customer_offer >= floor_price and (guard >= 3 or h.customer_offer >= h.asking_price * 0.85):
+		if h.customer_offer >= floor_price and (h.customer_offer >= h.asking_price * 0.85 or h.patience_left <= 2):
 			h.accept_customer_offer()
 			return
-		var next := maxf(floor_price, (h.asking_price + h.customer_offer) * 0.5)
-		h.offer_price(next, rng)
+		var dim := _honest_strategy(h)
+		if dim != "":
+			h.use_strategy(dim, rng)
+			continue
+		var q := h.asking_price
+		if h.last_quote > 0.0:
+			q = maxf(floor_price, (h.last_quote + maxf(h.customer_offer, floor_price)) * 0.5)
+		h.offer_price(q, rng)
 	if h.result == "ongoing":
 		h.choose_option("suggest_other", rng)
+
+
+## 还没用过、而且说的是真话的策略维度（真货在这一维比客人看到的更接近他想要的）。
+static func _honest_strategy(h: HaggleState) -> String:
+	var truth := HaggleState.dims_between(h.sku_id, h.expectation)
+	for dim in HaggleState.STRATEGIES:
+		if not h.strategies_used.has(dim) and float(truth[dim]) < float(h.d_dims[dim]) - 0.001:
+			return dim
+	return ""
 
 
 ## 用自动策略完整跑一旬营业（headless 模拟 / 存档回归测试用）。返回结算报告。
