@@ -10,7 +10,7 @@
 		"leisurely_elder": {"name": "闲逛老人", "weight": 0.2, "vec": [0.45, 0.4, 0.85, 0.45, 0.7]}
 	},
 	"derived": [
-		{"name": "patience_n", "const": 4.0, "terms": [[2.0, "composed"], [1.0, "agreeable"], [-1.0, "shrewd"]], "noise": 0.5, "clamp": [3, 9], "round": true},
+		{"name": "patience_n", "const": 5.0, "terms": [[2.0, "composed"], [1.0, "agreeable"], [-1.0, "shrewd"]], "noise": 0.5, "clamp": [3, 9], "round": true},
 		{"name": "crowd_pref", "const": -1.0, "terms": [[2.0, "sociable"]], "noise": 0.15, "clamp": [-1, 1]},
 		{"name": "initiative", "const": 0.0, "terms": [[0.7, "sociable"], [0.3, "shrewd"]], "noise": 0.1, "clamp": [0, 1]},
 		{"name": "candor", "const": 1.0, "terms": [[-1.0, "shrewd"]], "noise": 0.1, "clamp": [0, 1]},
