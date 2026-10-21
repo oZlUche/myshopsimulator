@@ -2,7 +2,7 @@ class_name RoomView
 extends Control
 ## 店面、仓库的全景（07 §3、§4）：开罗式斜 45° 的一间屋子，后面两堵墙，前面临街敞开。
 ## 画地面格、设备（货架、货柜、橱窗、模特、收银台、仓库货架）、地堆的箱子和包、玩家与客人。
-## 设备正面看得到每格货露出的边缘颜色（和近景面板一致），箱子只看得到纸箱。
+## 设备、纸箱、整包、手推车用美术线程的像素图；设备正面看得到每格货露出的边缘颜色（和近景面板一致），箱子只看得到纸箱。
 ## 点设备或地面 → cell_clicked；纯表现，规则都在核心层。
 
 signal cell_clicked(cell: Vector2i)
@@ -14,9 +14,10 @@ const FLOOR_A := Color("#4a4458")
 const FLOOR_B := Color("#45404f")
 const WALL_L := Color("#565c78")
 const WALL_R := Color("#4a4f68")
-const WOOD := Color("#8a6a4a")
-const METAL := Color("#7a808c")
 const CARDBOARD := Color("#b08a5a")
+## 纸箱、整包的精灵高度（美术像素，assets/sprites/equipment.json）
+const BOX_ART_H := 8.0
+const BAG_ART_H := 3.0
 
 var inv: Inventory
 var loc: String = ""
@@ -105,14 +106,14 @@ func _height_at(c: Vector2i) -> float:
 
 
 func _equip_height(def_id: String) -> float:
-	return {"shop_shelf": 78.0, "shop_cabinet": 80.0, "shop_window": 62.0, "mannequin": 58.0,
-		"shop_counter": 34.0, "warehouse_rack": 92.0}.get(def_id, 40.0)
+	var h := Iso.equipment_height(def_id)
+	return h if h > 0.0 else 40.0
 
 
 func _pile_height(sl: Slot) -> float:
 	var h := 0.0
 	for p in sl.packages:
-		h += 18.0 if p.is_box() else 6.0
+		h += (BOX_ART_H if p.is_box() else BAG_ART_H) * Iso.PX
 	return h
 
 
@@ -280,123 +281,78 @@ func _draw_overlay(o: Vector2) -> void:
 		draw_polyline(pts, col, 1.5)
 
 
-## 设备正面一层层画出每格货露出的边缘颜色。
+## 设备开口朝哪：朝着前面（+gy，临街那边）能站人就朝前，不然朝右前（+gx）。
+func _facing(c: Vector2i) -> String:
+	if c.y + 1 >= room().y or RoomGrid.walkable(inv, loc, c + Vector2i(0, 1)):
+		return "sw"
+	if RoomGrid.walkable(inv, loc, c + Vector2i(1, 0)):
+		return "se"
+	return "sw"
+
+
+## 设备用美术线程的像素图（docs/08 §5）：货架、橱窗每层按货堆从下往上画叠好的围巾（看得到的边缘色），
+## 模特披着最上面那条，仓库货架每层画箱和包。
 func _draw_equipment(o: Vector2, eid: String) -> void:
 	var e: Dictionary = inv.equipment[eid]
-	var g := Vector2(float(e["pos"][0]), float(e["pos"][1]))
+	var c := Vector2i(int(e["pos"][0]), int(e["pos"][1]))
 	var def_id: String = e["def_id"]
 	var slots := inv.equipment_slots(eid)
-	var h := _equip_height(def_id)
+	var extra := {}
 	match def_id:
-		"shop_counter":
-			Iso.draw_box(self, o, g + Vector2(0.05, 0.05), 0.9, 0.9, h, WOOD.darkened(0.1))
-			var top := Iso.to_screen(g + Vector2(0.5, 0.5), o) - Vector2(0, h)
-			draw_rect(Rect2(top + Vector2(-8, -12), Vector2(16, 10)), Color("#30343e"))
-			draw_rect(Rect2(top + Vector2(-6, -11), Vector2(12, 5)), Color("#7fd0a0"))
 		"shop_shelf", "shop_window":
-			var glass := def_id == "shop_window"
-			Iso.draw_box(self, o, g + Vector2(0.08, 0.08), 0.84, 0.84, h, Color(0.55, 0.75, 0.85, 0.35) if glass else WOOD,
-				Color(0.75, 0.9, 1.0, 0.4) if glass else Color(0, 0, 0, 0))
-			_draw_levels(o, g, slots, h, glass)
-		"shop_cabinet":
-			Iso.draw_box(self, o, g + Vector2(0.05, 0.05), 0.9, 0.9, h, Color("#6a4a3a"))
-			Iso.draw_face_rect(self, o, g + Vector2(0.05, 0.05), 0.9, 0.9, 0.49, 0.51, 6.0, h - 6.0, Color(0, 0, 0, 0.4))
-			Iso.draw_face_rect(self, o, g + Vector2(0.05, 0.05), 0.9, 0.9, 0.42, 0.46, h * 0.5 - 4.0, h * 0.5 + 4.0, Color("#d8c08a"))
-			Iso.draw_face_rect(self, o, g + Vector2(0.05, 0.05), 0.9, 0.9, 0.54, 0.58, h * 0.5 - 4.0, h * 0.5 + 4.0, Color("#d8c08a"))
+			var tiers: Array = []
+			for sl in slots:
+				tiers.append(sl.stack.items.map(func(it): return UIKit.sku_color(it.sku_id)))
+			extra["tiers"] = tiers
 		"mannequin":
-			Iso.draw_box(self, o, g + Vector2(0.25, 0.25), 0.5, 0.5, 8.0, Color("#3a3a44"))
-			var foot := Iso.to_screen(g + Vector2(0.5, 0.5), o) - Vector2(0, 8)
-			var scarf := Color("#d8d4cc")
 			if not slots.is_empty() and slots[0].stack.height() > 0:
-				scarf = UIKit.sku_color(slots[0].stack.items[-1].sku_id)
-			Iso.draw_person(self, foot, Color("#e8e2d8"), Color("#e8e2d8"), 1.0, 0.0, false, 1.4)
-			draw_rect(Rect2(foot + Vector2(-9, -35), Vector2(18, 6)), scarf)
-			draw_rect(Rect2(foot + Vector2(3, -30), Vector2(5, 14)), scarf)
+				extra["scarf"] = UIKit.sku_color(slots[0].stack.items[-1].sku_id)
 		"warehouse_rack":
-			_draw_rack(o, g, slots, h)
-		_:
-			Iso.draw_box(self, o, g + Vector2(0.1, 0.1), 0.8, 0.8, h, METAL)
-
-
-## 货架 / 橱窗的每一格是一层，层里按货堆从下往上画一条条边缘色。
-func _draw_levels(o: Vector2, g: Vector2, slots: Array[Slot], h: float, glass: bool) -> void:
-	var n := maxi(1, slots.size())
-	var level_h := (h - 8.0) / n
-	for j in slots.size():
-		var sl: Slot = slots[j]
-		var v0 := 4.0 + j * level_h
-		Iso.draw_face_rect(self, o, g + Vector2(0.08, 0.08), 0.84, 0.84, 0.0, 1.0, v0, v0 + 2.0, WOOD.darkened(0.3) if not glass else Color(1, 1, 1, 0.3))
-		var strip := minf(4.0, (level_h - 4.0) / maxf(1.0, sl.stack.max_height))
-		for i in sl.stack.height():
-			var col := UIKit.sku_color(sl.stack.items[i].sku_id)
-			var vv := v0 + 2.0 + i * strip
-			Iso.draw_face_rect(self, o, g + Vector2(0.08, 0.08), 0.84, 0.84, 0.12, 0.88, vv, vv + strip - 0.6, col)
+			var boxes: Array = []
+			var bags: Array = []
+			for sl in slots:
+				boxes.append(sl.packages.filter(func(p): return p.is_box()).size())
+				bags.append(sl.packages.filter(func(p): return not p.is_box()).size())
+			extra["boxes"] = boxes
+			extra["bags"] = bags
+	Iso.draw_equipment(self, o, Vector2(c), def_id, _facing(c), extra)
+	# 抽塌了掉在设备前面地上的货
+	for sl in slots:
 		if not sl.stack.collapsed_pile.is_empty():
-			var foot := Iso.to_screen(g + Vector2(0.5, 1.15), o)
+			var foot := Iso.to_screen(Vector2(c) + Vector2(0.5, 1.15), o)
 			for m in mini(sl.stack.collapsed_pile.size(), 5):
 				draw_rect(Rect2(foot + Vector2(-14 + m * 6, -3 - (m % 2) * 2), Vector2(10, 4)), UIKit.sku_color(sl.stack.collapsed_pile[m].sku_id))
 
 
-func _draw_rack(o: Vector2, g: Vector2, slots: Array[Slot], h: float) -> void:
-	var n := maxi(1, slots.size())
-	var level_h := (h - 6.0) / n
-	# 四根立柱 + 每层一块板，板上摆箱子 / 包
-	for j in n:
-		var v0 := 2.0 + j * level_h
-		Iso.draw_box(self, o, g + Vector2(0.05, 0.05), 0.9, 0.9, 3.0, METAL.darkened(0.2))
-		var base := g + Vector2(0.05, 0.05)
-		var off := Vector2(0, -v0)
-		var x := 0.08
-		for p in slots[j].packages:
-			var bw := 0.42 if p.is_box() else 0.14
-			var bh := 16.0 if p.is_box() else 7.0
-			Iso.draw_box(self, o + off, base + Vector2(x, 0.25), bw, 0.5, minf(bh, level_h - 6.0), CARDBOARD if p.is_box() else Color(0.85, 0.9, 1.0, 0.55))
-			x += bw + 0.02
-		Iso.draw_box(self, o + off, base, 0.9, 0.9, 2.0, METAL)
-	for corner in [Vector2(0.05, 0.95), Vector2(0.95, 0.95), Vector2(0.95, 0.05)]:
-		var p := Iso.to_screen(g + corner, o)
-		draw_line(p, p - Vector2(0, h), METAL.darkened(0.35), 2.0)
-
-
-## 地堆：箱子一箱箱摞起来，包是扁扁的一袋。
+## 地堆：纸箱一箱箱摞起来，包是扁扁的一袋（隔着袋子透出最上面那条的颜色）。拆开的箱子颜色浅一点。
 func _draw_pile(o: Vector2, sl: Slot) -> void:
 	var g := Vector2(sl.grid_pos)
 	var z := 0.0
-	var k: Knowledge = Game.state.knowledge if Game.state else null
 	for p in sl.packages:
-		var off := Vector2(0, -z)
 		if p.is_box():
-			Iso.draw_box(self, o + off, g + Vector2(0.15, 0.15), 0.7, 0.7, 17.0, CARDBOARD if p.sealed else CARDBOARD.lightened(0.12))
-			if p.sealed:
-				Iso.draw_face_rect(self, o + off, g + Vector2(0.15, 0.15), 0.7, 0.7, 0.46, 0.54, 0.0, 17.0, Color(0.9, 0.8, 0.6, 0.8))
-			if k and k.labels.has(p.id):
-				Iso.draw_face_rect(self, o + off, g + Vector2(0.15, 0.15), 0.7, 0.7, 0.15, 0.4, 5.0, 12.0, Color("#f0ece0"))
-			z += 18.0
+			Iso.draw_sprite(self, o, g, "eq_carton", Color.WHITE if p.sealed else Color(1.0, 0.93, 0.85), z)
+			z += BOX_ART_H
 		else:
 			var top := p.top_item()
-			Iso.draw_box(self, o + off, g + Vector2(0.25, 0.25), 0.5, 0.5, 5.0, UIKit.sku_color(top.sku_id).lerp(Color.WHITE, 0.35) if top else Color.WHITE)
-			z += 6.0
+			Iso.draw_sprite(self, o, g + Vector2(0.3, 0.3), "eq_bag", Color.WHITE.lerp(UIKit.sku_color(top.sku_id), 0.45) if top else Color.WHITE, z)
+			z += BAG_ART_H
 
 
-## 手推车：一块带轮子的板，上面摞着车里的箱 / 包。
+## 手推车：车板上摞着车里的箱 / 包。
 func _draw_cart(o: Vector2) -> void:
-	var g := cart_g - Vector2(0.45, 0.35)
-	Iso.draw_box(self, o, g, 0.9, 0.7, 6.0, METAL.darkened(0.15), METAL)
-	for w in [Vector2(0.15, 0.7), Vector2(0.8, 0.7)]:
-		draw_circle(Iso.to_screen(g + w, o), 3.0, Color("#202028"))
-	var hp := Iso.to_screen(g + Vector2(0.0, 0.35), o)
-	draw_line(hp - Vector2(0, 6), hp - Vector2(10, 30), METAL.darkened(0.3), 2.5)
+	var g := cart_g - Vector2(0.5, 0.5)
+	Iso.draw_equipment(self, o, g, "handcart", "sw")
 	if cart_slot == null:
 		return
-	var z := 6.0
+	var z := float(Iso.sprite_meta("eq_handcart_sw").get("H", 3))
 	for p in cart_slot.packages:
 		if p.is_box():
-			Iso.draw_box(self, o + Vector2(0, -z), g + Vector2(0.12, 0.08), 0.66, 0.54, 15.0, CARDBOARD if p.sealed else CARDBOARD.lightened(0.12))
-			z += 16.0
+			Iso.draw_sprite(self, o, g + Vector2(0.25, 0.3), "eq_carton_small_sw", Color.WHITE if p.sealed else Color(1.0, 0.93, 0.85), z)
+			z += float(Iso.sprite_meta("eq_carton_small_sw").get("H", 6))
 		else:
 			var top := p.top_item()
-			Iso.draw_box(self, o + Vector2(0, -z), g + Vector2(0.2, 0.15), 0.5, 0.4, 5.0, UIKit.sku_color(top.sku_id).lerp(Color.WHITE, 0.35) if top else Color.WHITE)
-			z += 6.0
+			Iso.draw_sprite(self, o, g + Vector2(0.35, 0.4), "eq_bag", Color.WHITE.lerp(UIKit.sku_color(top.sku_id), 0.45) if top else Color.WHITE, z)
+			z += BAG_ART_H
 
 
 # ---------- 人 ----------
