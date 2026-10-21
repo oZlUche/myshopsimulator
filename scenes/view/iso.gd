@@ -1,13 +1,51 @@
 class_name Iso
 extends RefCounted
-## 开罗式斜 45° 伪 3D 视角的绘制工具：地面是 2:1 菱形格，物体是带顶面和两个侧面的方块，人物是大头小身的伪 3D 小人。
+## 开罗式斜 45° 伪 3D 视角的绘制工具：地面是 2:1 菱形格，物体是带顶面和两个侧面的方块，人物是大头小身的像素小人。
 ## 世界格坐标 (gx, gy)：gx 沿街（屏幕右下方向），gy 横穿街（屏幕左下方向）。
 ## 调用方在自己的 _draw 里用；需要缩放时先 draw_set_transform。远处的先画，按 depth() 排序。
+##
+## 像素风：所有精灵都按 PX 倍放大画（1 个美术像素 = PX 个屏幕像素），位置用 snap() 对齐到像素网格，
+## 外层 draw_set_transform 的缩放请用 0.5 的整数倍，这样像素才不会忽大忽小。
+## 精灵由 tools/pixelart/gen_sprites.py 生成到 assets/sprites/；人物是分层灰度图，按颜色 modulate 上色换装。
 
 const TW := 64.0
 const TH := 32.0
+## 一个美术像素占几个屏幕像素
+const PX := 2.0
 const SKIN := Color("#f0d2b0")
 const OUTLINE := Color(0.08, 0.07, 0.1, 0.55)
+
+## 人物一帧的美术像素尺寸、脚底在帧里的高度、帧数、发型数（和生成脚本一致）
+const FW := 24
+const FH := 32
+const FOOT_Y := 30
+const FRAMES := 4
+const HAIR_STYLES := 7
+## 发型序号：短发、偏分、波波头、长发、马尾、发髻、鸭舌帽
+enum Hair { SHORT, PARTED, BOB, LONG, PONYTAIL, BUN, CAP }
+
+const T_OUTLINE := preload("res://assets/sprites/person_outline.png")
+const T_SKIN := preload("res://assets/sprites/person_skin.png")
+const T_TOP := preload("res://assets/sprites/person_top.png")
+const T_BOTTOM := preload("res://assets/sprites/person_bottom.png")
+const T_SHOES := preload("res://assets/sprites/person_shoes.png")
+const T_FACE := preload("res://assets/sprites/person_face.png")
+const T_SCARF := preload("res://assets/sprites/person_scarf.png")
+const T_HAIR := preload("res://assets/sprites/hair.png")
+const T_SHADOW := preload("res://assets/sprites/shadow.png")
+const T_FOLD := preload("res://assets/sprites/scarf_fold.png")
+const T_TILES := {
+	"pavement": [preload("res://assets/sprites/tile_pavement_0.png"), preload("res://assets/sprites/tile_pavement_1.png")],
+	"road": [preload("res://assets/sprites/tile_road_0.png"), preload("res://assets/sprites/tile_road_1.png")],
+	"grass": [preload("res://assets/sprites/tile_grass_0.png"), preload("res://assets/sprites/tile_grass_1.png")],
+	"lot": [preload("res://assets/sprites/tile_lot_0.png"), preload("res://assets/sprites/tile_lot_1.png")],
+}
+const T_KERB := {"nw": preload("res://assets/sprites/kerb_nw.png"), "se": preload("res://assets/sprites/kerb_se.png")}
+const T_BUBBLE := {
+	"ask": preload("res://assets/sprites/bubble_ask.png"),
+	"haggle": preload("res://assets/sprites/bubble_haggle.png"),
+	"wait": preload("res://assets/sprites/bubble_wait.png"),
+}
 
 
 static func to_screen(g: Vector2, origin: Vector2) -> Vector2:
@@ -19,6 +57,11 @@ static func depth(g: Vector2) -> float:
 	return g.x + g.y
 
 
+## 对齐到像素网格。
+static func snap(p: Vector2) -> Vector2:
+	return (p / PX).floor() * PX
+
+
 static func tile_points(g: Vector2, origin: Vector2, w := 1.0, d := 1.0) -> PackedVector2Array:
 	return PackedVector2Array([
 		to_screen(g, origin), to_screen(g + Vector2(w, 0), origin),
@@ -26,86 +69,147 @@ static func tile_points(g: Vector2, origin: Vector2, w := 1.0, d := 1.0) -> Pack
 	])
 
 
+## 纯色菱形（高亮、范围提示用）。地面请用 draw_ground。
 static func draw_tile(ci: CanvasItem, origin: Vector2, g: Vector2, col: Color, w := 1.0, d := 1.0, outline := Color(0, 0, 0, 0.12)) -> void:
 	var pts := tile_points(g, origin, w, d)
 	ci.draw_colored_polygon(pts, col)
 	if outline.a > 0.0:
 		pts.append(pts[0])
-		ci.draw_polyline(pts, outline, 1.0)
+		ci.draw_polyline(pts, outline, PX)
+
+
+## 一格地面贴图。kind：pavement 人行道 / road 街面 / grass 花坛 / lot 空地；variant 换一张花色。
+## kerb 为 "nw" / "se" 时在这格靠那条边上叠一道路缘石（人行道挨着街的那条边）。
+static func draw_ground(ci: CanvasItem, origin: Vector2, g: Vector2, kind: String, variant := 0, kerb := "") -> void:
+	var tiles: Array = T_TILES.get(kind, T_TILES["pavement"])
+	var tex: Texture2D = tiles[absi(variant) % tiles.size()]
+	var p := snap(to_screen(g, origin) - Vector2(TW * 0.5, 0))
+	ci.draw_texture_rect(tex, Rect2(p, Vector2(TW, TH)), false)
+	if kerb != "" and T_KERB.has(kerb):
+		ci.draw_texture_rect(T_KERB[kerb], Rect2(p, Vector2(TW, TH)), false)
 
 
 ## 方块：占地 w×d 格，高 h 像素。顶面亮、朝左前的面原色、朝右前的面暗，看起来有体积。
 static func draw_box(ci: CanvasItem, origin: Vector2, g: Vector2, w: float, d: float, h: float, col: Color, top: Color = Color(0, 0, 0, 0)) -> void:
-	var up := Vector2(0, -h)
-	var b := to_screen(g + Vector2(w, 0), origin)
-	var c := to_screen(g + Vector2(w, d), origin)
-	var dd := to_screen(g + Vector2(0, d), origin)
+	var up := Vector2(0, -snappedf(h, PX))
+	var b := snap(to_screen(g + Vector2(w, 0), origin))
+	var c := snap(to_screen(g + Vector2(w, d), origin))
+	var dd := snap(to_screen(g + Vector2(0, d), origin))
+	var a := snap(to_screen(g, origin))
 	var left := PackedVector2Array([dd, c, c + up, dd + up])
 	var right := PackedVector2Array([c, b, b + up, c + up])
 	ci.draw_colored_polygon(left, col)
 	ci.draw_colored_polygon(right, col.darkened(0.28))
-	var tp := tile_points(g, origin + up, w, d)
+	var tp := PackedVector2Array([a + up, b + up, c + up, dd + up])
 	ci.draw_colored_polygon(tp, top if top.a > 0.0 else col.lightened(0.18))
 	tp.append(tp[0])
-	ci.draw_polyline(tp, OUTLINE, 1.0)
-	ci.draw_line(c, c + up, OUTLINE, 1.0)
+	ci.draw_polyline(tp, OUTLINE, PX)
+	ci.draw_line(c, c + up, OUTLINE, PX)
 
 
 ## 朝左前的面上画一块贴面（窗、门、招牌）：u 沿面横向 0–1，v 从地面往上的像素。
 static func draw_face_rect(ci: CanvasItem, origin: Vector2, g: Vector2, w: float, d: float, u0: float, u1: float, v0: float, v1: float, col: Color) -> void:
-	var a := to_screen(g + Vector2(w * u0, d), origin)
-	var b := to_screen(g + Vector2(w * u1, d), origin)
+	var a := snap(to_screen(g + Vector2(w * u0, d), origin))
+	var b := snap(to_screen(g + Vector2(w * u1, d), origin))
+	v0 = snappedf(v0, PX)
+	v1 = snappedf(v1, PX)
 	ci.draw_colored_polygon(PackedVector2Array([a - Vector2(0, v0), b - Vector2(0, v0), b - Vector2(0, v1), a - Vector2(0, v1)]), col)
 
 
 static func draw_shadow(ci: CanvasItem, foot: Vector2, rx: float, ry: float, a := 0.3) -> void:
-	var pts := PackedVector2Array()
-	for i in 16:
-		var t := TAU * i / 16.0
-		pts.append(foot + Vector2(cos(t) * rx, sin(t) * ry))
-	ci.draw_colored_polygon(pts, Color(0, 0, 0, a))
+	var size := snap(Vector2(maxf(rx * 2.0, PX * 2), maxf(ry * 2.0, PX)))
+	ci.draw_texture_rect(T_SHADOW, Rect2(snap(foot - size * 0.5), size), false, Color(1, 1, 1, a))
 
 
-## 大头小身的伪 3D 小人，脚底在 foot。facing：+1 朝右前，-1 朝左前；back=true 背对镜头（看不到脸）。
-## phase 为走路动画相位（秒），站着传 0。
-static func draw_person(ci: CanvasItem, foot: Vector2, body: Color, hair: Color, facing := 1.0, phase := 0.0, back := false, k := 1.0) -> void:
-	draw_shadow(ci, foot, 9.0 * k, 4.0 * k)
-	var swing := sin(phase * 10.0) * 2.0 * k if phase != 0.0 else 0.0
-	var pants := body.darkened(0.45)
-	# 腿
-	ci.draw_rect(Rect2(foot + Vector2(-4.5 * k, -7 * k + swing * 0.5), Vector2(3.5 * k, 7 * k - swing * 0.5)), pants)
-	ci.draw_rect(Rect2(foot + Vector2(1.0 * k, -7 * k - swing * 0.5), Vector2(3.5 * k, 7 * k + swing * 0.5)), pants.darkened(0.15))
-	# 身体：正面 + 一条侧面，侧面在背光那边
-	var torso := Rect2(foot + Vector2(-6 * k, -17 * k), Vector2(12 * k, 11 * k))
-	ci.draw_rect(torso, body)
-	var side_w := 3.0 * k
-	var side_x := torso.position.x if facing > 0.0 else torso.end.x - side_w
-	ci.draw_rect(Rect2(Vector2(side_x, torso.position.y), Vector2(side_w, torso.size.y)), body.darkened(0.25))
-	ci.draw_rect(torso, OUTLINE, false, 1.0)
-	# 手臂随步伐前后摆
-	ci.draw_rect(Rect2(foot + Vector2(-8 * k, -16 * k - swing), Vector2(2.5 * k, 8 * k)), body.darkened(0.12))
-	ci.draw_rect(Rect2(foot + Vector2(5.5 * k, -16 * k + swing), Vector2(2.5 * k, 8 * k)), body.darkened(0.12))
-	# 大头
-	var head := foot + Vector2(0, -25 * k)
-	var r := 8.0 * k
-	ci.draw_circle(head, r, SKIN)
-	ci.draw_circle(head + Vector2(-facing * 2.5 * k, 0), r * 0.92, SKIN.darkened(0.06))
-	ci.draw_circle(head + Vector2(facing * 1.0 * k, 0), r * 0.85, SKIN)
-	if back:
-		ci.draw_circle(head, r, hair)
-	else:
-		# 头发盖住上半和背后那侧
-		var cap := PackedVector2Array()
-		for i in 13:
-			var t := PI + 0.1 + (PI - 0.2) * i / 12.0
-			cap.append(head + Vector2(cos(t) * r * 1.05, sin(t) * r * 1.05))
-		ci.draw_colored_polygon(cap, hair)
-		ci.draw_circle(head + Vector2(-facing * r * 0.7, -r * 0.1), r * 0.45, hair)
-		# 眼睛偏向朝向那一侧
-		var eye := head + Vector2(facing * 2.5 * k, 1.5 * k)
-		ci.draw_rect(Rect2(eye + Vector2(-3.2 * k, 0), Vector2(1.6 * k, 2.4 * k)), Color("#2a2230"))
-		ci.draw_rect(Rect2(eye + Vector2(1.6 * k, 0), Vector2(1.6 * k, 2.4 * k)), Color("#2a2230"))
-	ci.draw_arc(head, r, 0.0, TAU, 20, OUTLINE, 1.0)
+## 摊桌：四条腿的木板桌，铺一块桌布垂到两面。占地 w×d 格，桌面高 h 像素。
+static func draw_stall_table(ci: CanvasItem, origin: Vector2, g: Vector2, w: float, d: float, h: float, wood := Color("#7a5a3a"), cloth := Color("#9c3c3c")) -> void:
+	h = snappedf(h, PX)
+	var leg := wood.darkened(0.4)
+	for corner in [g + Vector2(0.08, d - 0.1), g + Vector2(w - 0.08, d - 0.1), g + Vector2(w - 0.08, 0.1), g + Vector2(0.08, 0.1)]:
+		var p := snap(to_screen(corner, origin))
+		ci.draw_rect(Rect2(p - Vector2(PX, h), Vector2(PX * 2, h)), leg)
+	draw_box(ci, origin, g, w, d, h, wood, wood.lightened(0.25))
+	# 桌布：盖住桌面，顺着两个朝镜头的面垂下一截，下摆一格一格的褶
+	var up := Vector2(0, -h)
+	var a := snap(to_screen(g, origin)) + up
+	var b := snap(to_screen(g + Vector2(w, 0), origin)) + up
+	var c := snap(to_screen(g + Vector2(w, d), origin)) + up
+	var dd := snap(to_screen(g + Vector2(0, d), origin)) + up
+	ci.draw_colored_polygon(PackedVector2Array([a, b, c, dd]), cloth.lightened(0.12))
+	var drop := Vector2(0, snappedf(minf(h * 0.45, 8.0), PX))
+	ci.draw_colored_polygon(PackedVector2Array([dd, c, c + drop, dd + drop]), cloth)
+	ci.draw_colored_polygon(PackedVector2Array([c, b, b + drop, c + drop]), cloth.darkened(0.3))
+	var hem := cloth.darkened(0.45)
+	var n := int((c - dd).length() / (PX * 4))
+	for i in range(0, n, 2):
+		var t0 := float(i) / n
+		var t1 := float(i + 1) / n
+		ci.draw_colored_polygon(PackedVector2Array([dd.lerp(c, t0) + drop, dd.lerp(c, t1) + drop, dd.lerp(c, t1) + drop + Vector2(0, PX), dd.lerp(c, t0) + drop + Vector2(0, PX)]), hem)
+	n = int((b - c).length() / (PX * 4))
+	for i in range(1, n, 2):
+		var t0 := float(i) / n
+		var t1 := float(i + 1) / n
+		ci.draw_colored_polygon(PackedVector2Array([c.lerp(b, t0) + drop, c.lerp(b, t1) + drop, c.lerp(b, t1) + drop + Vector2(0, PX), c.lerp(b, t0) + drop + Vector2(0, PX)]), hem)
+	ci.draw_polyline(PackedVector2Array([a, b, c, dd, a]), OUTLINE, PX)
+
+
+## 叠好的一份围巾（侧面能看到颜色）：bottom 是这份货的底边中点。一叠往上摞时每层高 FOLD_STEP。
+const FOLD_STEP := 2.0 * PX
+static func draw_scarf_fold(ci: CanvasItem, bottom: Vector2, col: Color, jitter := 0) -> void:
+	var size := Vector2(T_FOLD.get_width(), T_FOLD.get_height()) * PX
+	var p := snap(bottom - Vector2(size.x * 0.5, size.y)) + Vector2(float(jitter % 3 - 1) * PX, 0)
+	ci.draw_texture_rect(T_FOLD, Rect2(p, size), false, col)
+
+
+## 客人头顶的气泡：kind = ask 问价 / haggle 讲价 / wait 等货。pos 是气泡左上角。
+static func draw_bubble(ci: CanvasItem, pos: Vector2, kind: String, a := 1.0) -> void:
+	if not T_BUBBLE.has(kind):
+		return
+	var tex: Texture2D = T_BUBBLE[kind]
+	ci.draw_texture_rect(tex, Rect2(snap(pos), Vector2(tex.get_width(), tex.get_height()) * PX), false, Color(1, 1, 1, a))
+
+
+## 大头小身的像素小人，脚底在 foot。facing：+1 朝右前，-1 朝左前；back=true 背对镜头（看不到脸）。
+## phase 为走路动画相位（秒），站着传 0。k 放大倍数只取整（1 或 2），像素才整齐。
+## style 发型（Hair 枚举，-1 按衣服发色自动挑一个）；pants 裤色（透明 = 按上衣加深）；scarf 有颜色就围一条围巾。
+## 颜色的 alpha 会一起作用到整个人（路人淡出用）。
+static func draw_person(ci: CanvasItem, foot: Vector2, body: Color, hair: Color, facing := 1.0, phase := 0.0, back := false, k := 1.0, style := -1, pants := Color(0, 0, 0, 0), scarf := Color(0, 0, 0, 0)) -> void:
+	var px := PX * maxf(1.0, floorf(k))
+	var a := body.a
+	draw_shadow(ci, foot, 8.0 * px, 3.0 * px, 0.3 * a)
+	var dir := (2 if back else 0) + (1 if facing < 0.0 else 0)
+	var frame := 0 if phase == 0.0 else int(floor(phase * 6.4)) % FRAMES
+	if style < 0:
+		style = absi(body.to_rgba32() ^ hair.to_rgba32()) % HAIR_STYLES
+	style = clampi(style, 0, HAIR_STYLES - 1)
+	var size := Vector2(FW, FH) * px
+	var pos := snap(foot - Vector2(FW * 0.5, FOOT_Y) * px)
+	var dst := Rect2(pos, size)
+	var src := Rect2(Vector2(frame * FW, dir * FH), Vector2(FW, FH))
+	var hsrc := Rect2(Vector2(frame * FW, (style * 4 + dir) * FH), Vector2(FW, FH))
+	var white := Color(1, 1, 1, a)
+	if pants.a <= 0.0:
+		pants = body.darkened(0.45)
+		pants.a = a
+	var skin := SKIN
+	skin.a = a
+	hair.a = a
+	ci.draw_texture_rect_region(T_OUTLINE, dst, hsrc, white)
+	ci.draw_texture_rect_region(T_SKIN, dst, src, skin)
+	ci.draw_texture_rect_region(T_TOP, dst, src, body)
+	ci.draw_texture_rect_region(T_BOTTOM, dst, src, pants)
+	ci.draw_texture_rect_region(T_SHOES, dst, src, white)
+	ci.draw_texture_rect_region(T_HAIR, dst, hsrc, hair)
+	ci.draw_texture_rect_region(T_FACE, dst, src, white)
+	if scarf.a > 0.0:
+		scarf.a *= a
+		ci.draw_texture_rect_region(T_SCARF, dst, src, scarf)
+
+
+## 人物在屏幕上占的范围（点击判定用）：脚底在 foot。
+static func person_rect(foot: Vector2, k := 1.0) -> Rect2:
+	var px := PX * maxf(1.0, floorf(k))
+	return Rect2(foot + Vector2(-FW * 0.5, -FOOT_Y) * px, Vector2(FW, FOOT_Y + 1) * px)
 
 
 ## 格坐标里的移动 / 朝向方向 → draw_person 用的 [facing, back]。
@@ -116,8 +220,26 @@ static func facing_of(dir: Vector2) -> Array:
 	return [1.0 if sx >= 0.0 else -1.0, sy < 0.0]
 
 
-## 按 id 稳定地给路人挑一套衣服 / 发色。
+## 按 id 稳定地给路人挑一套衣服 / 发色（旧接口，返回 [上衣, 发色]）。
 static func outfit(seed_value: int) -> Array:
-	const BODIES := ["#c85a3c", "#3c7ac8", "#5aa05a", "#9a5ac8", "#d8a03c", "#4a8a8a", "#c8c0b0", "#6a6a7a", "#b84a7a"]
-	const HAIRS := ["#2a2026", "#4a3020", "#6a4a2a", "#1a1a1a", "#8a6a4a", "#b0a090"]
-	return [Color(BODIES[absi(seed_value) % BODIES.size()]), Color(HAIRS[(absi(seed_value) / 7) % HAIRS.size()])]
+	var o := outfit_full(seed_value)
+	return [o["top"], o["hair"]]
+
+
+## 按 id 稳定地挑一整套打扮：{top 上衣, pants 裤子, hair 发色, style 发型, scarf 围巾颜色（多数人是透明）}。
+static func outfit_full(seed_value: int) -> Dictionary:
+	const TOPS := ["#c85a3c", "#3c7ac8", "#5aa05a", "#9a5ac8", "#d8a03c", "#4a8a8a", "#c8c0b0", "#6a6a7a", "#b84a7a", "#e0e0e0", "#2e4a7a", "#8a6a4a"]
+	const PANTS := ["#3a3a4a", "#5a4a3a", "#2a3a5a", "#6a6a6a", "#2a2a2a", "#7a7060"]
+	const HAIRS := ["#2a2026", "#4a3020", "#6a4a2a", "#1a1a1a", "#8a6a4a", "#b0a090", "#3a2a2a"]
+	const SCARVES := ["#c0392b", "#22315a", "#e6d5b8", "#7d3c98", "#1e5631", "#b5835a"]
+	var s := absi(seed_value)
+	var scarf := Color(0, 0, 0, 0)
+	if (s / 97) % 4 == 0:
+		scarf = Color(SCARVES[(s / 389) % SCARVES.size()])
+	return {
+		"top": Color(TOPS[s % TOPS.size()]),
+		"pants": Color(PANTS[(s / 13) % PANTS.size()]),
+		"hair": Color(HAIRS[(s / 7) % HAIRS.size()]),
+		"style": (s / 31) % HAIR_STYLES,
+		"scarf": scarf,
+	}

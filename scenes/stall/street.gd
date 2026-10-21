@@ -96,7 +96,7 @@ const VIEW_M := 18
 
 
 func _origin() -> Vector2:
-	return CAMERA_AT - Iso.to_screen(Vector2(player_x, CAMERA_GY), Vector2.ZERO)
+	return Iso.snap(CAMERA_AT - Iso.to_screen(Vector2(player_x, CAMERA_GY), Vector2.ZERO))
 
 
 func _walker_g(w: Dictionary) -> Vector2:
@@ -111,16 +111,16 @@ func _draw() -> void:
 	# 地面：店面后的空地、人行道、街面、对面的花坛
 	for x in range(x0, x1):
 		for gy in range(-4, 9):
-			var col: Color
-			if gy < 0:
-				col = Color("#3a3d33")
-			elif gy == 0 or gy == 5:
-				col = Color("#8c8578") if (x + gy) % 2 == 0 else Color("#837c70")
-			elif gy < 5:
-				col = Color("#5d5a66") if (x + gy) % 2 == 0 else Color("#56535f")
-			else:
-				col = Color("#3f5a3a") if (x * 3 + gy) % 5 != 0 else Color("#4a6a42")
-			Iso.draw_tile(self, o, Vector2(x, gy), col)
+			var kind := "lot"
+			var kerb := ""
+			if gy == 0 or gy == 5:
+				kind = "pavement"
+				kerb = "se" if gy == 0 else "nw"
+			elif gy > 0 and gy < 5:
+				kind = "road"
+			elif gy > 5:
+				kind = "grass"
+			Iso.draw_ground(self, o, Vector2(x, gy), kind, x * 7 + gy * 13, kerb)
 	# 别的摊子的排他范围：以摊子中心为圆心的圆，站进去就不能摆
 	for v in s.street.vendors:
 		var c := Street.vendor_pos(v)
@@ -155,15 +155,15 @@ func _draw() -> void:
 				_draw_vendor_stall(o, g)
 			"walker":
 				var w: Dictionary = th["w"]
-				var fit := Iso.outfit(int(w["seed"]))
+				var fit := Iso.outfit_full(int(w["seed"]))
 				var p := Iso.to_screen(g, o)
 				var a := clampf(float(w["life"]), 0.0, 1.0)
 				_draw_walker(p, fit, float(w["vx"]), t + float(w["seed"]) * 0.1, a)
 			"player":
 				var p := Iso.to_screen(g, o)
 				var f := Iso.facing_of(player_dir)
-				Iso.draw_person(self, p, UIKit.ACCENT, Color("#2a2026"), f[0], t if _walking() else 0.0, f[1], 1.2)
-				draw_string(font, p + Vector2(-30, -48), "你", HORIZONTAL_ALIGNMENT_CENTER, 60, 14, UIKit.TEXT)
+				Iso.draw_person(self, p, UIKit.ACCENT, Color("#2a2026"), f[0], t if _walking() else 0.0, f[1], 1.0, Iso.Hair.SHORT, Color("#3a3a4a"))
+				draw_string(font, p + Vector2(-30, -70), "你", HORIZONTAL_ALIGNMENT_CENTER, 60, 14, UIKit.TEXT)
 
 
 func _walking() -> bool:
@@ -183,13 +183,13 @@ func _draw_ground_circle(o: Vector2, c: Vector2, r: float, col: Color, filled: b
 
 
 ## 路人：沿街走（gx 方向是屏幕右下，往回走是左上，背对镜头）。快消失时变淡。
-func _draw_walker(p: Vector2, fit: Array, vx: float, phase: float, a: float) -> void:
-	var body: Color = fit[0]
-	var hair: Color = fit[1]
+func _draw_walker(p: Vector2, fit: Dictionary, vx: float, phase: float, a: float) -> void:
+	var body: Color = fit["top"]
+	var pants: Color = fit["pants"]
 	body.a = a
-	hair.a = a
+	pants.a = a
 	var f := Iso.facing_of(Vector2(vx, 0))
-	Iso.draw_person(self, p, body, hair, f[0], phase, f[1])
+	Iso.draw_person(self, p, body, fit["hair"], f[0], phase, f[1], 1.0, fit["style"], pants, fit["scarf"])
 
 
 func _draw_building(o: Vector2, bx: int) -> void:
@@ -213,15 +213,16 @@ func _draw_building(o: Vector2, bx: int) -> void:
 ## 别的商贩：摊主站在桌后（店面那侧）面朝街，桌上有块布，头顶撑着棚子。
 func _draw_vendor_stall(o: Vector2, g: Vector2) -> void:
 	var f := Iso.facing_of(Vector2(0, 1))
-	Iso.draw_person(self, Iso.to_screen(g + Vector2(0, -0.5), o), Color("#6a6a7a"), Color("#1a1a1a"), f[0], 0.0, f[1])
+	var fit := Iso.outfit_full(int(g.x * 31.0))
+	Iso.draw_person(self, Iso.to_screen(g + Vector2(0, -0.5), o), fit["top"], fit["hair"], f[0], 0.0, f[1], 1.0, fit["style"], fit["pants"])
 	var tg := g + Vector2(-0.7, 0.0)
-	Iso.draw_box(self, o, tg, 1.4, 0.6, 16.0, Color("#7a4b3a"), Color("#c8b089"))
-	var canopy := o + Vector2(0, -44)
+	Iso.draw_stall_table(self, o, tg, 1.4, 0.6, 16.0, Color("#7a4b3a"), Color("#4a6a8a"))
+	var canopy := o + Vector2(0, -60)
 	for c in [tg, tg + Vector2(1.4, 0), tg + Vector2(1.4, 0.6), tg + Vector2(0, 0.6)]:
-		var p := Iso.to_screen(c, o)
-		draw_line(p, p + Vector2(0, -44), Color("#3a2a20"), 2.0)
-	Iso.draw_box(self, canopy, tg + Vector2(-0.15, -0.15), 1.7, 0.9, 5.0, Color("#c85a3c"), Color("#e07a5a"))
-	draw_string(get_theme_default_font(), Iso.to_screen(g, o) + Vector2(-20, -76), "商贩", HORIZONTAL_ALIGNMENT_CENTER, 40, 13, UIKit.MUTED)
+		var p := Iso.snap(Iso.to_screen(c, o))
+		draw_rect(Rect2(p + Vector2(-Iso.PX * 0.5, -60), Vector2(Iso.PX, 60)), Color("#3a2a20"))
+	Iso.draw_box(self, canopy, tg + Vector2(-0.15, -0.15), 1.7, 0.9, 6.0, Color("#c85a3c"), Color("#e07a5a"))
+	draw_string(get_theme_default_font(), Iso.to_screen(g, o) + Vector2(-20, -84), "商贩", HORIZONTAL_ALIGNMENT_CENTER, 40, 13, UIKit.MUTED)
 
 
 func _try_place() -> void:
