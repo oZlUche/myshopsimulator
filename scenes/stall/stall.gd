@@ -28,6 +28,10 @@ var _next_number := 1
 var _price_spin: SpinBox
 var _minigame: PullMinigame
 var _visitor_rows: Dictionary = {}   # 客人 id → 右侧名单里的那一行
+var _bundle_spin: SpinBox
+## 卖光后自动收摊的倒计时（秒，实时）；<0 表示没在倒数
+var _sold_out_timer := -1.0
+var _table_empty_hinted := false
 
 
 func _ready() -> void:
@@ -38,6 +42,7 @@ func _ready() -> void:
 	session.visitor_arrived.connect(_on_visitor_arrived)
 	session.visitor_left.connect(_on_visitor_left)
 	_build()
+	_area.visitor_clicked.connect(_on_visitor_clicked)
 	_say("找好位置了。先把行囊里的货摆到摊位上，然后开张。时间还没开始走。")
 	_say("点堆顶那份的顶面：从顶部拿一份到手上，不会塌；点下面某份的侧面：从中间抽，抽不好上面会塌。再点某一格的空处，把手上的货放到那堆顶上。")
 	_refresh_all()
@@ -106,7 +111,7 @@ func _build() -> void:
 	root.add_child(right)
 	_main_button = UIKit.button("开张！", _on_main_button, 20)
 	right.add_child(_main_button)
-	right.add_child(UIKit.label("在摊前的客人（点问价的客人去议价）", 14, UIKit.MUTED))
+	right.add_child(UIKit.label("在摊前的客人（点问价的去讲价；谈成后把货拿到手上，点他交货）", 14, UIKit.MUTED))
 	_visitor_box = UIKit.vbox(4)
 	right.add_child(_visitor_box)
 	var hp := UIKit.panel()
@@ -131,6 +136,29 @@ func _process(dt: float) -> void:
 		_close_shop_time()
 	_refresh_header()
 	_refresh_visitors()
+	_check_goods(dt)
+
+
+## 卖光自动收摊 / 摊上空了提示（01 §6.9）。倒计时按实际时间走。
+func _check_goods(real_dt: float) -> void:
+	if phase != Phase.OPEN:
+		return
+	if session.sold_out() and _haggle == null:
+		if _sold_out_timer < 0.0:
+			_sold_out_timer = 3.0
+			_say("[color=#6cc070]卖光了！收摊回家。[/color]")
+		else:
+			_sold_out_timer -= real_dt
+			if _sold_out_timer <= 0.0:
+				_pack_up(true)
+		return
+	_sold_out_timer = -1.0
+	if session.table_empty() and session.goods_left() > 0:
+		if not _table_empty_hinted:
+			_table_empty_hinted = true
+			_say("摊上空了，从行囊补货或收摊。")
+	else:
+		_table_empty_hinted = false
 
 
 func _say(t: String) -> void:
@@ -183,6 +211,8 @@ func _visitor_text(v: Dictionary) -> String:
 			return "#%d%s 在问价，还能等 %d 秒 → 去招呼" % [num, regular, int(float(v["wait"]))]
 		"haggling":
 			return "#%d%s 正在跟你讲价" % [num, regular]
+		"waiting_item":
+			return "#%d%s 谈好了，等你拿货，还能等 %d 秒 → 交货" % [num, regular, int(float(v["wait"]))]
 		_:
 			return "#%d%s 在看货" % [num, regular]
 
@@ -212,6 +242,11 @@ func _refresh_visitors() -> void:
 				# 按下就算点到，新客人到来挤动名单时也不会吞掉松开那一下
 				b.action_mode = BaseButton.ACTION_MODE_BUTTON_PRESS
 				b.disabled = _haggle != null
+				row = b
+			"waiting_item":
+				var b := UIKit.button(_visitor_text(v), func(): _deliver(v), 14)
+				b.action_mode = BaseButton.ACTION_MODE_BUTTON_PRESS
+				b.add_theme_color_override("font_color", UIKit.GOOD)
 				row = b
 			"haggling":
 				row = UIKit.label(_visitor_text(v), 14, Color("#6fa8dc"))
@@ -333,6 +368,43 @@ func _on_visitor_arrived(v: Dictionary) -> void:
 func _on_visitor_left(v: Dictionary) -> void:
 	if v == _haggle_visitor:
 		return
+	if v["state"] == "left" and not v["want"].is_empty() and phase == Phase.OPEN:
+		var num: int = _area.visitor_numbers.get(v["customer"].id, 0)
+		if v["ctx"].wrong_deliveries < 2:
+			_say("[color=#e05a4f]#%d 等不到货，走了。这单黄了。[/color]" % num)
+
+
+## 点客人（右侧名单或场景里的人）：问价中 → 去讲价；等货中 → 交货；看货中 → 不理会（预留"招呼"）。
+func _on_visitor_clicked(v: Dictionary) -> void:
+	match v["state"]:
+		"asking":
+			_start_haggle(v)
+		"waiting_item":
+			_deliver(v)
+
+
+## 把手上的货递给等货的客人（01 §6.4）。
+func _deliver(v: Dictionary) -> void:
+	var num: int = _area.visitor_numbers.get(v["customer"].id, 0)
+	var r := session.deliver(v, _hand())
+	match r["result"]:
+		"empty":
+			_say("#%d：「我要的是%s。」" % [num, v["hint"]])
+		"wrong":
+			_say("[color=#e05a4f]#%d：「不是这条。」[/color]他有点不耐烦了，货还在你手上。" % num)
+			_spend(1.0)
+		"wrong_left":
+			_say("[color=#e05a4f]#%d：「又不对，算了不要了。」[/color]走了。" % num)
+			_spend(1.0)
+		"partial":
+			_say("[color=#6cc070]#%d 收下 %d 条，付了 %d 元。[/color]还差：%s。" % [num, r["count"], roundi(r["paid"]), v["hint"]])
+			_spend(1.0)
+		"ok":
+			_say("[color=#6cc070]交货，收 %d 元。[/color]" % roundi(r["paid"]))
+			if r["continued"]:
+				_say("#%d 又在摊上挑起来了。" % num)
+			_spend(1.0)
+	_refresh_all()
 
 
 func _start_haggle(v: Dictionary) -> void:
@@ -382,6 +454,17 @@ func _refresh_haggle() -> void:
 	_haggle_box.add_child(UIKit.button("就按 %d 元卖给你" % roundi(_haggle.customer_offer), func(): _haggle.accept_customer_offer(); _after_haggle_step(), 14))
 	for id in HaggleState.OPTIONS:
 		_haggle_box.add_child(UIKit.button("「%s」" % HaggleState.OPTIONS[id], func(): _haggle.choose_option(id, s.rng); _after_haggle_step(), 14))
+	if _haggle.bundle_available():
+		var brow := UIKit.hbox(6)
+		_bundle_spin = SpinBox.new()
+		_bundle_spin.min_value = 1
+		_bundle_spin.max_value = 19999
+		var other := _haggle.asking_price + session.price_of(_haggle.bundle_extra["sku_id"])
+		_bundle_spin.value = roundf(other * 0.9)
+		brow.add_child(_bundle_spin)
+		brow.add_child(UIKit.button("「%s」再加一条，两条一共这个价" % HaggleState.BUNDLE_LINE,
+			func(): _haggle.offer_bundle(_bundle_spin.value, s.rng); _after_haggle_step(), 14))
+		_haggle_box.add_child(brow)
 
 
 func _after_haggle_step() -> void:
@@ -389,26 +472,15 @@ func _after_haggle_step() -> void:
 	_refresh_haggle()
 
 
+## 议价结束。谈成了不自动出货：客人等你把货找出来拿到手上，再点他交货。
 func _end_haggle() -> void:
-	if _haggle.result == "deal":
-		var loc := session.locate(_haggle_visitor["item_id"])
-		if not loc.is_empty():
-			_with_pull(loc["slot_id"], loc["index"], func(input): _finish_haggle(input))
-			return
-	_finish_haggle(ActionAPI.CAREFUL_PULL)
-
-
-func _finish_haggle(input: Dictionary) -> void:
-	var r := session.finish(_haggle_visitor, _haggle, input)
-	if _haggle.result == "deal":
-		if r.get("ok", false):
-			_say("[color=#6cc070]卖出一条，收 %d 元。[/color]" % roundi(_haggle.final_price))
-			if r.get("collapsed", false):
-				_say("[color=#e05a4f]从下面抽的时候上面的货塌了！[/color]")
-		else:
-			_say("那份货找不着了，这单没做成。")
+	var v := _haggle_visitor
+	var h := _haggle
 	_haggle = null
 	_haggle_visitor = {}
+	session.finish(v, h)
+	if v["state"] == "waiting_item":
+		_say("[color=#6cc070]谈成了，%d 元%s。[/color]把他要的那份拿到手上，再点他交货。" % [roundi(h.final_price), "（两条）" if h.bundle else ""])
 	_refresh_all()
 
 
@@ -433,11 +505,13 @@ func _close_shop_time() -> void:
 	_say("天色晚了，路上没什么人了。")
 
 
-func _pack_up() -> void:
+func _pack_up(sold_out := false) -> void:
 	if _haggle != null:
 		_say("先把手上这单谈完。")
 		return
+	phase = Phase.CLOSED
+	session.close()
 	var lost := api.pack_up()
 	if lost > 0:
 		_say("行囊装不下，%d 份只能扔了。" % lost)
-	Game.end_period({"lost_on_pack_up": lost})
+	Game.end_period({"lost_on_pack_up": lost, "sold_out": sold_out})

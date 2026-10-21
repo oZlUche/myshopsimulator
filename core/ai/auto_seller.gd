@@ -20,27 +20,56 @@ static func run(h: HaggleState, unit_cost: float, rng: GameRng) -> void:
 
 
 ## 用自动策略完整跑一旬营业（headless 模拟 / 存档回归测试用）。返回结算报告。
+## 谈成后按真相层直接找到那份货（不翻看、规范手法抽取）拿到手上交货；卖光就提前收摊。
 static func simulate_stall_period(s: GameState, stall_x: float = -1.0, step: float = 1.0) -> Dictionary:
 	if stall_x < 0.0:
 		stall_x = _pick_spot(s)
 	var session := StallSession.new(s, stall_x)
+	var sold_out := false
 	while not session.is_over():
 		session.tick(step)
 		for v in session.visitors.duplicate():
-			if v["state"] == "asking":
-				var h := session.start_haggle(v)
-				if h == null:
-					session.finish(v, null)
-					continue
-				var loc := session.locate(v["item_id"])
-				var sl: Slot = s.inventory.slots[loc["slot_id"]]
-				var cost := float(sl.stack.items[loc["index"]].provenance.get("unit_cost", 0.0))
-				run(h, cost, s.rng)
-				session.finish(v, h)
+			if v["state"] != "asking":
+				continue
+			var h := session.start_haggle(v)
+			if h == null:
+				session.finish(v, null)
+				continue
+			var loc := session.locate(v["item_id"])
+			var sl: Slot = s.inventory.slots[loc["slot_id"]]
+			var cost := float(sl.stack.items[loc["index"]].provenance.get("unit_cost", 0.0))
+			run(h, cost, s.rng)
+			session.finish(v, h)
+			if v["state"] == "waiting_item":
+				fetch_and_deliver(session, v)
+		if session.sold_out():
+			sold_out = true
+			break
+	session.close()
 	var lost := ActionAPI.new(s).pack_up()
 	var report := PeriodRunner.end_period(s)
 	report["lost_on_pack_up"] = lost
+	report["sold_out"] = sold_out
 	return report
+
+
+## 把客人要的货（他指的那份，找不到就同款）拿到手上交给他。
+static func fetch_and_deliver(session: StallSession, v: Dictionary) -> Dictionary:
+	var hand := session.s.inventory.hand()
+	for w in v["want"]:
+		if w["done"] or hand.stack.is_full():
+			continue
+		var loc := session.locate(w["item_id"])
+		if not loc.is_empty() and loc["slot_id"] == hand.id:
+			continue
+		if loc.is_empty():
+			loc = session.find_sku(w["sku_id"])
+		if loc.is_empty():
+			continue
+		var r := session.api.pull_item(loc["slot_id"], loc["index"])
+		if r["item"] != null:
+			session.api.place_on_top(r["item"], hand.id)
+	return session.deliver(v, hand)
 
 
 ## 选一个人流较大且不在商贩排他半径内的位置。

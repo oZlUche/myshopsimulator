@@ -9,6 +9,9 @@ const TABLE_GY := 2.9
 const VISITOR_GY := 2.35
 const PLAYER_GY := 4.0
 
+## 点到了某位客人（问价的去讲价、等货的交货，由摊位界面决定）
+signal visitor_clicked(visitor: Dictionary)
+
 var session: StallSession
 var walkers: Array = []   # [{g, vel, life, stayed, seed}]
 ## 客人编号 → 显示用
@@ -70,6 +73,27 @@ func visitor_g(i: int) -> Vector2:
 	return Vector2(center_gx() - span * 0.5 + span * (i + 0.5) / n, VISITOR_GY - 0.6 * (i % 2))
 
 
+## 客人身体在控件坐标里的点击范围。
+func visitor_rect(i: int) -> Rect2:
+	var f := _fit()
+	var k: float = f["k"]
+	var foot := Iso.to_screen(visitor_g(i), f["origin"]) * k
+	return Rect2(foot + Vector2(-13, -54) * k, Vector2(26, 58) * k)
+
+
+func _gui_input(e: InputEvent) -> void:
+	if session == null or not (e is InputEventMouseButton) or not e.pressed or e.button_index != MOUSE_BUTTON_LEFT:
+		return
+	# 前排的客人挡住后排的，从近到远找
+	var order := range(session.visitors.size())
+	order.sort_custom(func(a, b): return Iso.depth(visitor_g(a)) > Iso.depth(visitor_g(b)))
+	for i in order:
+		if visitor_rect(i).has_point(e.position):
+			visitor_clicked.emit(session.visitors[i])
+			accept_event()
+			return
+
+
 func _draw() -> void:
 	if session == null:
 		return
@@ -113,7 +137,7 @@ func _draw() -> void:
 				# 客人站在摊前，面朝摊桌（+gy）
 				var fc := Iso.facing_of(Vector2(0, 1))
 				Iso.draw_person(self, p, fit[0], fit[1], fc[0], 0.0, fc[1])
-				var col := {"browsing": Color("#b8b5c4"), "asking": UIKit.ACCENT, "haggling": Color("#6fa8dc")}.get(v["state"], Color.GRAY) as Color
+				var col := {"browsing": Color("#b8b5c4"), "asking": UIKit.ACCENT, "haggling": Color("#6fa8dc"), "waiting_item": UIKit.GOOD}.get(v["state"], Color.GRAY) as Color
 				draw_string(font, p + Vector2(-14, -40), "#%d" % visitor_numbers.get(v["customer"].id, 0), HORIZONTAL_ALIGNMENT_CENTER, 28, 13, col)
 				if v["state"] == "asking":
 					draw_circle(p + Vector2(13, -44), 8.0, Color.WHITE)
@@ -121,6 +145,13 @@ func _draw() -> void:
 				elif v["state"] == "haggling":
 					draw_circle(p + Vector2(13, -44), 8.0, Color("#6fa8dc"))
 					draw_string(font, p + Vector2(6, -38), "¥", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color.WHITE)
+				elif v["state"] == "waiting_item":
+					# 伸着手等货：气泡里一条小围巾，下面一截等待条
+					draw_circle(p + Vector2(13, -44), 8.0, UIKit.GOOD)
+					draw_rect(Rect2(p + Vector2(8, -47), Vector2(10, 5)), Color.WHITE)
+					var left := clampf(float(v["wait"]) / maxf(session.wait_for_item(v["customer"]), 1.0), 0.0, 1.0)
+					draw_rect(Rect2(p + Vector2(-12, 4), Vector2(24, 3)), Color(0, 0, 0, 0.5))
+					draw_rect(Rect2(p + Vector2(-12, 4), Vector2(24 * left, 3)), UIKit.GOOD if left > 0.3 else Color("#e05a4f"))
 			"table":
 				_draw_table(o)
 			"player":
