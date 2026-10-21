@@ -13,7 +13,8 @@ var speed := 1.0
 var _clock: Label
 var _day: ProgressBar
 var _cash: Label
-var _area: AreaView
+## 场地全景：摊位是 AreaView，店面是 ShopView（都提供 visitor_numbers、add_walker、step、visitor_clicked）
+var _area
 var _table_box: HBoxContainer
 var _bag_box: HBoxContainer
 var _visitor_box: VBoxContainer
@@ -62,6 +63,41 @@ func _build() -> void:
 	var left := UIKit.vbox(8)
 	left.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	root.add_child(left)
+	_build_top(left)
+
+	_area = AreaView.new()
+	_area.session = session
+	_area.custom_minimum_size = Vector2(0, 270)
+	left.add_child(_area)
+
+	left.add_child(UIKit.label("摊位（从正面只看得到每份货露出的边缘颜色；右键翻看，悬停看记忆）", 13, UIKit.MUTED))
+	_table_box = UIKit.hbox(8)
+	left.add_child(_table_box)
+	left.add_child(UIKit.label("行囊", 13, UIKit.MUTED))
+	_bag_box = UIKit.hbox(8)
+	left.add_child(_bag_box)
+
+	var right := UIKit.vbox(8)
+	right.custom_minimum_size = Vector2(420, 0)
+	root.add_child(right)
+	_main_button = UIKit.button("开张！", _on_main_button, 20)
+	right.add_child(_main_button)
+	right.add_child(UIKit.label("在摊前的客人（点问价的去讲价；谈成后把货拿到手上，点他交货）", 14, UIKit.MUTED))
+	_visitor_box = UIKit.vbox(4)
+	right.add_child(_visitor_box)
+	var hp := UIKit.panel()
+	right.add_child(hp)
+	_haggle_box = UIKit.vbox(6)
+	hp.add_child(_haggle_box)
+	_log = RichTextLabel.new()
+	_log.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_log.scroll_following = true
+	_log.add_theme_font_size_override("normal_font_size", 14)
+	right.add_child(_log)
+
+
+## 顶上一行：时钟、一旬进度、现金、速度。
+func _build_top(left: Container) -> void:
 	var top := UIKit.hbox(10)
 	left.add_child(top)
 	_clock = UIKit.label("", 18, UIKit.ACCENT)
@@ -94,36 +130,6 @@ func _build() -> void:
 	flow.tooltip_text = "时间流速（设置项）"
 	flow.value_changed.connect(func(v): Game.time_scale = v; _refresh_header())
 	_speed_box.add_child(flow)
-
-	_area = AreaView.new()
-	_area.session = session
-	_area.custom_minimum_size = Vector2(0, 270)
-	left.add_child(_area)
-
-	left.add_child(UIKit.label("摊位（从正面只看得到每份货露出的边缘颜色；右键翻看，悬停看记忆）", 13, UIKit.MUTED))
-	_table_box = UIKit.hbox(8)
-	left.add_child(_table_box)
-	left.add_child(UIKit.label("行囊", 13, UIKit.MUTED))
-	_bag_box = UIKit.hbox(8)
-	left.add_child(_bag_box)
-
-	var right := UIKit.vbox(8)
-	right.custom_minimum_size = Vector2(420, 0)
-	root.add_child(right)
-	_main_button = UIKit.button("开张！", _on_main_button, 20)
-	right.add_child(_main_button)
-	right.add_child(UIKit.label("在摊前的客人（点问价的去讲价；谈成后把货拿到手上，点他交货）", 14, UIKit.MUTED))
-	_visitor_box = UIKit.vbox(4)
-	right.add_child(_visitor_box)
-	var hp := UIKit.panel()
-	right.add_child(hp)
-	_haggle_box = UIKit.vbox(6)
-	hp.add_child(_haggle_box)
-	_log = RichTextLabel.new()
-	_log.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_log.scroll_following = true
-	_log.add_theme_font_size_override("normal_font_size", 14)
-	right.add_child(_log)
 
 
 func _process(dt: float) -> void:
@@ -448,7 +454,7 @@ func _refresh_haggle() -> void:
 		hint_lines.append("（看不出这人的心思。学【客人观察】能看得更多。）")
 	for l in hint_lines:
 		_haggle_box.add_child(UIKit.label(l, 13, UIKit.MUTED))
-	_haggle_box.add_child(UIKit.label("他指着摊上白框那份。标价：%d 元" % roundi(_haggle.asking_price), 14))
+	_haggle_box.add_child(UIKit.label("%s标价：%d 元" % [_pointing_text(), roundi(_haggle.asking_price)], 14))
 	_haggle_box.add_child(UIKit.label(_cost_line(), 14, UIKit.MUTED))
 	_haggle_box.add_child(UIKit.label("「%s」" % _haggle.last_line, 18))
 	if _haggle.result != "ongoing":
@@ -488,6 +494,11 @@ func _refresh_haggle() -> void:
 		brow.add_child(UIKit.button("「%s」再加一条，两条一共这个价" % HaggleState.BUNDLE_LINE,
 			func(): _haggle.offer_bundle(_bundle_spin.value, s.rng); _after_haggle_step(), 14))
 		_haggle_box.add_child(brow)
+
+
+## 客人指的是哪份货。
+func _pointing_text() -> String:
+	return "他指着摊上白框那份。"
 
 
 ## 成本价一直显示（01 §6.4）；能「一起买」时两条各自的成本和合计都列出来。

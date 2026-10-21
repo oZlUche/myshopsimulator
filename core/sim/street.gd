@@ -31,8 +31,12 @@ func density(x: float, t: float = 0.5) -> float:
 	for h in hotspots:
 		var dx := (x - float(h["x"])) / float(h["sigma"])
 		d += float(h["peak"]) * exp(-0.5 * dx * dx)
-	var time_mult := 0.6 + 0.4 * exp(-pow((t - 0.35) / 0.12, 2)) + 0.5 * exp(-pow((t - 0.75) / 0.1, 2))
-	return d * time_mult
+	return d * time_curve(t)
+
+
+## 一旬里人流随时段的起伏：午间与傍晚两个高峰（店面也用这条曲线）。
+static func time_curve(t: float) -> float:
+	return 0.6 + 0.4 * exp(-pow((t - 0.35) / 0.12, 2)) + 0.5 * exp(-pow((t - 0.75) / 0.1, 2))
 
 
 static func vendor_pos(v: Dictionary) -> Vector2:

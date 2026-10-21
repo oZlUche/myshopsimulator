@@ -26,3 +26,8 @@ jobs:
           ./godot --headless --path . --script res://tests/tools/ui_smoke.gd 2>&1 | tee ui.log
           grep -q "UI_SMOKE PASS" ui.log
           ! grep -q "SCRIPT ERROR" ui.log
+      - name: Shop smoke test (scripted shop preview: stock, warehouse, sell)
+        run: |
+          ./godot --headless --path . --script res://tests/tools/shop_smoke.gd 2>&1 | tee shop.log
+          grep -q "SHOP_SMOKE PASS" shop.log
+          ! grep -q "SCRIPT ERROR" shop.log

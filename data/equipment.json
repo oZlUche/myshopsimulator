@@ -15,5 +15,33 @@
 	"stall_board_small": {
 		"name": "折叠摊位板", "phase": "stall", "price": 120, "resale_ratio": 0.5, "footprint": 2.0,
 		"provides_slots": [{"type": "StallTable", "count": 4, "max_height": 4, "display_score": 0.8, "access_cost": 0.8}]
+		},
+	"shop_counter": {
+		"name": "收银台", "phase": "shop", "room": "Shop", "price": 0, "resale_ratio": 0.0, "footprint": 1, "size": [1, 1], "fixed": true,
+		"provides_slots": []
+	},
+	"shop_shelf": {
+		"name": "货架", "phase": "shop", "room": "Shop", "price": 260, "resale_ratio": 0.5, "footprint": 1, "size": [1, 1],
+		"provides_slots": [{"type": "ShopDisplay", "count": 3, "max_height": 4, "display_score": 0.7, "access_cost": 1.0}]
+	},
+	"shop_cabinet": {
+		"name": "货柜", "phase": "shop", "room": "Shop", "price": 300, "resale_ratio": 0.5, "footprint": 1, "size": [1, 1],
+		"provides_slots": [{"type": "ShopBackroom", "count": 4, "max_height": 8, "display_score": 0.0, "access_cost": 1.6, "pkg_capacity": 3}]
+	},
+	"shop_window": {
+		"name": "橱窗", "phase": "shop", "room": "Shop", "price": 500, "resale_ratio": 0.5, "footprint": 1, "size": [1, 1], "front_only": true, "street_visible": true,
+		"provides_slots": [{"type": "ShopDisplay", "count": 2, "max_height": 3, "display_score": 1.0, "access_cost": 0.9}]
+	},
+	"mannequin": {
+		"name": "模特", "phase": "shop", "room": "Shop", "price": 400, "resale_ratio": 0.5, "footprint": 1, "size": [1, 1],
+		"provides_slots": [{"type": "ShopDisplay", "count": 1, "max_height": 1, "display_score": 1.2, "access_cost": 0.8}]
+	},
+	"warehouse_rack": {
+		"name": "仓库货架", "phase": "shop", "room": "Warehouse", "price": 200, "resale_ratio": 0.5, "footprint": 1, "size": [1, 1],
+		"provides_slots": [{"type": "WarehouseShelf", "count": 3, "max_height": 0, "display_score": 0.0, "access_cost": 1.0, "pkg_capacity": 6}]
+	},
+	"hand_cart": {
+		"name": "手推车", "phase": "shop", "price": 150, "resale_ratio": 0.4, "footprint": 0,
+		"provides_slots": [{"type": "Cart", "count": 1, "max_height": 0, "display_score": 0.0, "access_cost": 1.0, "pkg_capacity": 6}]
 	}
 }

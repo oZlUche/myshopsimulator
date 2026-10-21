@@ -76,7 +76,7 @@ func purchase(sku_id: String, qty: int, unit_price: float, _actor: String = "pla
 
 func place_on_top(item: ScarfItem, slot_id: String, _actor: String = "player") -> bool:
 	var sl := _slot(slot_id)
-	if sl == null or sl.stack.is_full():
+	if sl == null or sl.stack.is_full() or not sl.packages.is_empty():
 		return false
 	item.reset_pull()
 	sl.stack.settle()
@@ -165,7 +165,7 @@ func take_top(slot_id: String, _actor: String = "player") -> ScarfItem:
 ## 从一个堆顶拿一份到手上；手上满了返回 null。
 func take_top_to_hand(slot_id: String) -> ScarfItem:
 	var h := s.inventory.hand()
-	if h.stack.is_full() or slot_id == h.id:
+	if h.stack.is_full() or slot_id == h.id or not h.packages.is_empty():
 		return null
 	var it := take_top(slot_id)
 	if it != null:
@@ -272,8 +272,171 @@ func discard(slot_id: String, index: int) -> bool:
 	return true
 
 
+## 手写标签（认知层）：货堆格子、箱、包都能写，key 是槽位或整箱整包的 ID。空字符串 = 擦掉。
 func write_label(slot_id: String, text: String) -> void:
-	s.knowledge.labels[slot_id] = text
+	if text.strip_edges() == "":
+		s.knowledge.labels.erase(slot_id)
+	else:
+		s.knowledge.labels[slot_id] = text
+
+
+# ---------- 整箱整包（07 §2） ----------
+const OPEN_BOX_SECONDS := 8.0
+const LOOK_INTO_BOX_SECONDS := 2.0
+const OPEN_PACK_SECONDS := 3.0
+const UNPACK_PER_ITEM_SECONDS := 0.5
+const LABEL_SECONDS := 2.0
+const MOVE_PACKAGE_SECONDS := 2.0
+
+
+## 把某格最上面那个箱 / 包抱到手上。手上得没拿着散货，而且抱得下（1 箱或 3 包）。返回 {ok, reason, package}。
+func take_package(slot_id: String) -> Dictionary:
+	var sl := _slot(slot_id)
+	var h := s.inventory.hand()
+	if sl == null or sl.packages.is_empty():
+		return {"ok": false, "reason": "这里没有箱子或包"}
+	if h.stack.height() > 0:
+		return {"ok": false, "reason": "手上拿着散货，先放下"}
+	var p: Package = sl.packages[-1]
+	if not h.can_hold(p):
+		return {"ok": false, "reason": "抱不下了，一次只能抱 1 箱或 3 包"}
+	sl.packages.pop_back()
+	h.packages.append(p)
+	return {"ok": true, "package": p}
+
+
+## 把手上最上面那个箱 / 包放到某格顶上（地堆最高 4 箱，07 §2）。返回 {ok, reason}。
+func put_package(slot_id: String) -> Dictionary:
+	var sl := _slot(slot_id)
+	var h := s.inventory.hand()
+	if sl == null or h.packages.is_empty():
+		return {"ok": false, "reason": "手上没有箱子或包"}
+	var p: Package = h.packages[-1]
+	if sl.type == "Floor" and RoomGrid.is_aisle(s.inventory, sl.location_id, sl.grid_pos):
+		return {"ok": false, "reason": "这格是过道，不能堆东西"}
+	if not sl.can_hold(p):
+		return {"ok": false, "reason": "放不下" if sl.pkg_capacity > 0 else "这里不能放整箱整包"}
+	h.packages.pop_back()
+	sl.packages.append(p)
+	return {"ok": true}
+
+
+## 在两个格子之间搬一个箱 / 包（手推车装卸、自动模拟用）：from 最上面那个放到 to 顶上。
+func move_package(from_slot: String, to_slot: String) -> Dictionary:
+	var a := _slot(from_slot)
+	var b := _slot(to_slot)
+	if a == null or b == null or a.packages.is_empty():
+		return {"ok": false, "reason": "这里没有箱子或包"}
+	if b.type == "Floor" and RoomGrid.is_aisle(s.inventory, b.location_id, b.grid_pos):
+		return {"ok": false, "reason": "这格是过道，不能堆东西"}
+	if not b.can_hold(a.packages[-1]):
+		return {"ok": false, "reason": "放不下"}
+	b.packages.append(a.packages.pop_back())
+	return {"ok": true}
+
+
+## 拆开某格（含手上）最上面那箱。返回 false 表示上面不是封着的箱。
+func open_box(slot_id: String) -> bool:
+	var sl := _slot(slot_id)
+	if sl == null or sl.packages.is_empty() or not sl.packages[-1].is_box() or not sl.packages[-1].sealed:
+		return false
+	sl.packages[-1].sealed = false
+	s.bus.emit("box_opened", {"package_id": sl.packages[-1].id})
+	return true
+
+
+## 撕开某格（含手上）最上面那包的袋子，之后能一条条拿。返回 false 表示上面不是封着的包。
+func open_pack(slot_id: String) -> bool:
+	var sl := _slot(slot_id)
+	if sl == null or sl.packages.is_empty() or sl.packages[-1].is_box() or not sl.packages[-1].sealed:
+		return false
+	sl.packages[-1].sealed = false
+	return true
+
+
+## 看一眼包：隔着袋子看最上面那条（按翻看规则，可能认错，03 §3）。结果写进认知层。
+func look_at_pack(pack: Package) -> Dictionary:
+	var top := pack.top_item()
+	if top == null:
+		return {}
+	var p := Sampler.peek(top, s.rng)
+	s.knowledge.perceived[top.id] = p
+	return p
+
+
+## 从某格（含手上）最上面那个已拆开的箱里拿出最上面那包，抱到手上。返回 {ok, reason, package}。
+func take_pack_from_box(slot_id: String) -> Dictionary:
+	var sl := _slot(slot_id)
+	var h := s.inventory.hand()
+	if sl == null or sl.packages.is_empty() or not sl.packages[-1].is_box():
+		return {"ok": false, "reason": "最上面不是箱子"}
+	var box: Package = sl.packages[-1]
+	if box.sealed:
+		return {"ok": false, "reason": "箱子还封着，先拆箱"}
+	if box.packs.is_empty():
+		return {"ok": false, "reason": "箱子空了"}
+	if h.stack.height() > 0:
+		return {"ok": false, "reason": "手上拿着散货，先放下"}
+	var pack: Package = box.packs[-1]
+	# 箱子在手上时，拿出一包后手上是"空箱 + 一包"，超了；这种情况先把箱子放下
+	if sl.id == h.id or not h.can_hold(pack):
+		return {"ok": false, "reason": "手上抱不下了"}
+	box.packs.pop_back()
+	h.packages.append(pack)
+	return {"ok": true, "package": pack}
+
+
+## 把一包放回某格最上面那个已拆开的箱里。
+func put_pack_into_box(slot_id: String) -> Dictionary:
+	var sl := _slot(slot_id)
+	var h := s.inventory.hand()
+	if sl == null or sl.packages.is_empty() or not sl.packages[-1].is_box() or sl.packages[-1].sealed:
+		return {"ok": false, "reason": "这里没有打开的箱子"}
+	if h.packages.is_empty() or h.packages[-1].is_box():
+		return {"ok": false, "reason": "手上没有包"}
+	var box: Package = sl.packages[-1]
+	if box.packs.size() >= Wholesale.BOX_PACKS:
+		return {"ok": false, "reason": "箱子装满了"}
+	box.packs.append(h.packages.pop_back())
+	return {"ok": true}
+
+
+## 拆包上架（07 §2）：src 格（可以是手上）最上面那包撕开，按袋里的顺序倒到 dst 那堆顶上，
+## 放不下的留在开口包里（开口包还是一个包）；倒空了包就没了。返回 {ok, reason, moved, left}。
+func unpack_to(src_slot: String, dst_slot: String) -> Dictionary:
+	var a := _slot(src_slot)
+	var b := _slot(dst_slot)
+	if a == null or a.packages.is_empty() or a.packages[-1].is_box():
+		return {"ok": false, "reason": "最上面不是包", "moved": 0, "left": 0}
+	if b == null or b.stack.max_height <= 0 or not b.packages.is_empty():
+		return {"ok": false, "reason": "这里放不了散货", "moved": 0, "left": 0}
+	var pack: Package = a.packages[-1]
+	pack.sealed = false
+	var moved := 0
+	while not pack.items.is_empty() and not b.stack.is_full():
+		var it: ScarfItem = pack.items.pop_front()
+		place_on_top(it, b.id)
+		moved += 1
+	if pack.items.is_empty():
+		a.packages.pop_back()
+	s.bus.emit("pack_unpacked", {"package_id": pack.id, "moved": moved})
+	return {"ok": moved > 0, "reason": "" if moved > 0 else "那堆满了", "moved": moved, "left": pack.items.size()}
+
+
+## 从开口包里拿最上面那条到手上（包得是开着的，手上不能抱着别的箱包）。
+func take_from_open_pack(slot_id: String) -> ScarfItem:
+	var sl := _slot(slot_id)
+	var h := s.inventory.hand()
+	if sl == null or sl.packages.is_empty() or sl.packages[-1].is_box() or sl.packages[-1].sealed:
+		return null
+	if h.stack.is_full() or not h.packages.is_empty():
+		return null
+	var pack: Package = sl.packages[-1]
+	var it: ScarfItem = pack.items.pop_back()
+	if pack.items.is_empty():
+		sl.packages.pop_back()
+	place_on_top(it, h.id)
+	return it
 
 
 ## 卖出：从槽位取出该货并收钱。返回 pull 结果 + ok。
@@ -325,18 +488,55 @@ func pack_up() -> int:
 
 
 ## 购置设备（01 §4.9）：扣现金，向场所注入槽位。摆摊设备只能在摆摊阶段买。
-func buy_equipment(def_id: String, location_id: String) -> Dictionary:
+## 店面、仓库的设备要给格子 pos，摆不下（RoomGrid.can_place）就不买。
+func buy_equipment(def_id: String, location_id: String, pos := Vector2i(-1, -1)) -> Dictionary:
 	var def: Dictionary = DataDB.equipment().get(def_id, {})
 	if def.is_empty():
 		return {"ok": false, "reason": "没有这种设备"}
 	var phase: String = def.get("phase", "any")
 	if phase != "any" and phase != s.player.phase:
 		return {"ok": false, "reason": "当前阶段用不上"}
+	if pos.x >= 0:
+		var why := RoomGrid.can_place(s.inventory, location_id, def_id, pos)
+		if why != "":
+			return {"ok": false, "reason": why}
 	var price := float(def.get("price", 0.0))
 	if price > s.player.cash + 0.0001:
 		return {"ok": false, "reason": "现金不够"}
 	s.player.cash -= price
-	var eid := s.inventory.install_equipment(def_id, location_id)
+	var eid := s.inventory.install_equipment(def_id, location_id, pos)
 	s.knowledge.add_ledger(s.clock.period, "equipment", -price, def.get("name", def_id))
 	s.bus.emit("equipment_bought", {"def_id": def_id, "equipment_id": eid})
 	return {"ok": true, "equipment_id": eid}
+
+
+## 把店面 / 仓库里的设备挪到另一格（07 §4.1）。收银台固定不动。返回 {ok, reason}。
+func move_equipment(eid: String, pos: Vector2i) -> Dictionary:
+	var e: Dictionary = s.inventory.equipment.get(eid, {})
+	if e.is_empty() or not e.has("pos"):
+		return {"ok": false, "reason": "没有这件设备"}
+	if DataDB.equipment().get(e["def_id"], {}).get("fixed", false):
+		return {"ok": false, "reason": "这个挪不了"}
+	var why := RoomGrid.can_place(s.inventory, e["location_id"], e["def_id"], pos, eid)
+	if why != "":
+		return {"ok": false, "reason": why}
+	e["pos"] = [pos.x, pos.y]
+	for sl in s.inventory.equipment_slots(eid):
+		sl.grid_pos = pos
+	return {"ok": true}
+
+
+## 卖掉一件设备：上面得先清空，按 resale_ratio 退钱。返回 {ok, reason, refund}。
+func sell_equipment(eid: String) -> Dictionary:
+	var e: Dictionary = s.inventory.equipment.get(eid, {})
+	if e.is_empty():
+		return {"ok": false, "reason": "没有这件设备"}
+	var def: Dictionary = DataDB.equipment().get(e["def_id"], {})
+	if def.get("fixed", false):
+		return {"ok": false, "reason": "这个卖不了"}
+	if not s.inventory.remove_equipment(eid):
+		return {"ok": false, "reason": "上面还有货，先清空"}
+	var refund := float(def.get("price", 0.0)) * float(def.get("resale_ratio", 0.0))
+	s.player.cash += refund
+	s.knowledge.add_ledger(s.clock.period, "equipment", refund, "卖掉" + def.get("name", e["def_id"]))
+	return {"ok": true, "refund": refund}
