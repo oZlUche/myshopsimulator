@@ -233,3 +233,16 @@ func test_sold_out_detection() -> void:
 	# 摊上空了但行囊还有：不算卖光
 	ss.api.place_on_top(ss.s.inventory.create_item(RED), ss.s.inventory.slots_of_type("Bag")[0].id)
 	assert_true(ss.table_empty() and not ss.sold_out())
+
+
+func test_cost_shown_from_provenance_or_estimated() -> void:
+	var ss := _session()
+	var t := _table(ss, [RED])
+	var bought := ss.s.inventory.create_item(BLUE, {"unit_cost": 23.5})
+	ss.api.place_on_top(bought, t.id)
+	assert_eq(ss.cost_of(bought.id, BLUE), {"cost": 23.5, "estimated": false}, "有进价记录就用实际进价")
+	var old := ss.cost_of(t.stack.items[0].id, RED)
+	assert_true(old["estimated"], "没有记录的老货标「约」")
+	assert_true(float(old["cost"]) > 0.0)
+	ss.s.supplier_catalog = [{"sku_id": RED, "unit_price": 30.0, "stock": 5}]
+	assert_near(float(ss.cost_of(t.stack.items[0].id, RED)["cost"]), 30.0, 0.0001, "按当前本地进货价估算")

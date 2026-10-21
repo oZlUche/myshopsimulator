@@ -353,6 +353,18 @@ func price_of(sku_id: String) -> float:
 	return float(s.stall["prices"].get(sku_id, DataDB.sku(sku_id)["base_price"]))
 
 
+## 这份货的成本价（01 §6.4）：玩家自己的账，直接读真相层的进价记录，不受技能影响。
+## 没有进价记录的老货按当前本地进货价估算（店里这期没这款时取进价区间中值），estimated = true。
+func cost_of(item_id: String, sku_id: String) -> Dictionary:
+	for it in s.inventory.all_items():
+		if it.id == item_id and it.provenance.has("unit_cost"):
+			return {"cost": float(it.provenance["unit_cost"]), "estimated": false}
+	for e in s.supplier_catalog:
+		if e["sku_id"] == sku_id:
+			return {"cost": float(e["unit_price"]), "estimated": true}
+	return {"cost": float(DataDB.sku(sku_id).get("base_cost", 0.0)) * 1.175, "estimated": true}
+
+
 ## 议价结束。成交 → 客人等你拿货（waiting_item），不自动出货；没谈成 → 离开。
 ## 被价格吓跑计 scared_off；耐心用完走的常客回购率扣一点；嘟囔难听话会让摊前其他客人 P −0.05。
 func finish(v: Dictionary, h: HaggleState) -> void:
