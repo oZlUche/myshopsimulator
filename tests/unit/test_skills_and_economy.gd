@@ -43,11 +43,15 @@ func test_season_material_blends_at_boundary() -> void:
 
 func test_continuous_cycle_decays() -> void:
 	var e := EconomyState.new()
-	e.push_observation({"price_ratio": 0.5})
+	for i in 10:
+		e.push_observation({"price_ratio": 0.0, "sales": 10, "traffic": 100})
+	for i in 4:
+		e.push_observation({"price_ratio": 0.3, "sales": 15, "traffic": 150})
 	var c1 := e.continuous_term()
-	for i in 20:
-		e.push_observation({"price_ratio": 0.0})
-	assert_true(absf(e.continuous_term()) < absf(c1) * 0.2, "旧观测的影响应指数衰减")
+	assert_true(c1 > 0.0, "最近比过去好，C 为正")
+	for i in 40:
+		e.push_observation({"price_ratio": 0.0, "sales": 10, "traffic": 100})
+	assert_true(absf(e.continuous_term()) < absf(c1) * 0.2, "旧观测出了 36 旬窗口就不再有影响")
 
 
 func test_year_end_only_reads_delta_history() -> void:
