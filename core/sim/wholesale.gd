@@ -11,10 +11,12 @@ const MIX_COLORS := [3, 5]
 const SENDERS := ["义乌·锦绣围巾厂", "杭州·丝路服饰", "广州·白马批发 3 楼", "海宁·暖绒针织厂", "绍兴·柯桥轻纺城"]
 
 
-## 一条围巾的批发单价。
-static func unit_cost(pattern: String, material: String, mix: String) -> float:
+## 一条围巾的批发单价：厂价 base_cost · π · material_cost_mult[m]（09 §3.1）× 包型倍率。econ 为空时按 π = 1、M = 1。
+static func unit_cost(pattern: String, material: String, mix: String, econ: Dictionary = {}) -> float:
 	var any := "scarf_%s_%s_%s" % [pattern, "black", material]
-	return snappedf(float(DataDB.sku(any)["base_cost"]) * float(PRICE_MULT.get(mix, 1.0)), 0.5)
+	var factory := float(DataDB.sku(any)["base_cost"]) * float(econ.get("price_level", 1.0)) \
+		* float(econ.get("material_cost_mult", {}).get(material, 1.0))
+	return snappedf(factory * float(PRICE_MULT.get(mix, 1.0)), 0.5)
 
 
 ## 一包。single 用 color 那一种色；mixed 按 color_weights 挑 3–5 种色，条数随机分（每种至少 1 条），袋里顺序打乱。
@@ -58,11 +60,12 @@ static func make_pack(inv: Inventory, pattern: String, material: String, mix: St
 
 ## 一批货：lines = [{pattern, material, mix, color?, packs}]，按顺序每 BOX_PACKS 包装一箱。
 ## 返回箱子列表，物流单写同一个发货方、"第 i 件 / 共 n 件"、毛重。
-static func make_shipment(inv: Inventory, lines: Array, color_weights: Dictionary, rng: GameRng, period: int) -> Array[Package]:
+static func make_shipment(inv: Inventory, lines: Array, color_weights: Dictionary, rng: GameRng, period: int,
+		econ: Dictionary = {}) -> Array[Package]:
 	var packs: Array[Package] = []
 	for line in lines:
 		var mix: String = line.get("mix", "single")
-		var cost := unit_cost(line["pattern"], line["material"], mix)
+		var cost := unit_cost(line["pattern"], line["material"], mix, econ)
 		var prov := {"bought_period": period, "unit_cost": cost, "source": "wholesale"}
 		for i in int(line["packs"]):
 			packs.append(make_pack(inv, line["pattern"], line["material"], mix, str(line.get("color", "")), color_weights, rng, prov))

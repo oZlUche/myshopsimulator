@@ -349,7 +349,7 @@ func layout_panel(box: VBoxContainer, done: Callable) -> void:
 	box.add_child(row)
 	for id in placeable_defs():
 		var d: Dictionary = DataDB.equipment()[id]
-		var b := UIKit.button("%s %d 元" % [d["name"], int(d.get("price", 0))], start_placing.bind(id), 14)
+		var b := UIKit.button("%s %d 元" % [d["name"], int(s.equipment_price(id))], start_placing.bind(id), 14)
 		b.toggle_mode = true
 		b.button_pressed = placing_def == id and picked_eid == ""
 		row.add_child(b)
@@ -359,7 +359,7 @@ func layout_panel(box: VBoxContainer, done: Callable) -> void:
 		var prow := UIKit.hbox(6)
 		prow.add_child(UIKit.label("选中：%s" % d.get("name", ""), 14, UIKit.ACCENT))
 		prow.add_child(UIKit.button("挪到别处", start_moving, 14))
-		prow.add_child(UIKit.button("卖掉（退 %d 元）" % roundi(float(d.get("price", 0)) * float(d.get("resale_ratio", 0))), sell_picked, 14))
+		prow.add_child(UIKit.button("卖掉（退 %d 元）" % roundi(s.equipment_price(e["def_id"]) * float(d.get("resale_ratio", 0))), sell_picked, 14))
 		box.add_child(prow)
 	var brow := UIKit.hbox(6)
 	if placing_def != "":
@@ -414,7 +414,7 @@ func layout_click(c: Vector2i) -> void:
 	elif placing_def != "":
 		var r := api.buy_equipment(placing_def, loc, c)
 		if r["ok"]:
-			say.call("摆好了%s，花了 %d 元。" % [DataDB.equipment()[placing_def]["name"], int(DataDB.equipment()[placing_def].get("price", 0))])
+			say.call("摆好了%s，花了 %d 元。" % [DataDB.equipment()[placing_def]["name"], int(s.equipment_price(placing_def))])
 		else:
 			say.call(r["reason"] + "。")
 	else:

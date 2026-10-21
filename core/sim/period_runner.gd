@@ -12,12 +12,13 @@ static func begin_period(s: GameState) -> void:
 	s.stall["x"] = null
 	for e in s.supplier_catalog:
 		if not s.stall["prices"].has(e["sku_id"]):
-			s.stall["prices"][e["sku_id"]] = float(DataDB.sku(e["sku_id"])["base_price"])
+			s.stall["prices"][e["sku_id"]] = s.list_price(e["sku_id"])
 	s.bus.emit("period_begin", {"period": s.clock.period})
 
 
-## 旬末结算：观测入经济循环、趋势漂移、审美预报、年末宏观调整、时钟推进。返回结算报告。
+## 旬末结算：观测入经济循环、趋势漂移、审美预报、年末宏观调整、时钟推进、物价等宏观状态走一步。返回结算报告。
 static func end_period(s: GameState) -> Dictionary:
+	var g_prev := s.economy.level() - 1.0
 	var st := s.period_stats
 	var sales := int(st["sales"])
 	var report := {
@@ -43,6 +44,7 @@ static func end_period(s: GameState) -> Dictionary:
 		report["year_changed"] = true
 	var old_season := s.clock.season()
 	s.clock.period += 1
+	s.economy.period_step(s.clock.period, g_prev, s.rng)
 	report["season_changed"] = s.clock.season() != old_season
 	s.bus.emit("period_end", report)
 	return report

@@ -153,7 +153,7 @@ func _refresh_bag() -> void:
 		var spec: Dictionary = d["provides_slots"][0]
 		var row := UIKit.hbox(10)
 		row.add_child(UIKit.label("%s　%.0f 元　（+%d 个%s格，每格高 %d）已有 %d" % [
-			d["name"], d["price"], spec["count"], "行囊" if spec["type"] == "Bag" else "摊位", spec["max_height"], owned], 16))
+			d["name"], s.equipment_price(def_id), spec["count"], "行囊" if spec["type"] == "Bag" else "摊位", spec["max_height"], owned], 16))
 		var loc := "player" if spec["type"] == "Bag" else "stall"
 		row.add_child(UIKit.button("购买", func(): _buy_equipment(def_id, loc)))
 		_equip_box.add_child(row)
@@ -200,7 +200,7 @@ func _refresh_prices() -> void:
 		sp.min_value = 1
 		sp.max_value = 9999
 		sp.step = 1
-		sp.value = float(s.stall["prices"].get(sku_id, DataDB.sku(sku_id)["base_price"]))
+		sp.value = float(s.stall["prices"].get(sku_id, s.list_price(sku_id)))
 		sp.value_changed.connect(func(v): s.stall["prices"][sku_id] = v)
 		row.add_child(sp)
 		_price_box.add_child(row)

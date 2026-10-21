@@ -22,8 +22,13 @@ var careless: float = 0.3
 var derived: Dictionary = {}
 ## 预期值向量，按优先级排好：[{color, material, pattern, weight: {color, material, pattern}}]
 var expectations: Array = []
-## 预算倍率：心理价 = base_price × budget_mult × 接近程度修正
+## 预算倍率：心理价 = base_price × budget_mult × 接近程度修正。
+## budget_mult = 消费能力 S · 物价 π · 个人宽裕程度 budget_noise（09 §3.3），每次来店时按当旬经济重算。
 var budget_mult: float = 1.0
+## 个人宽裕程度 exp(N(0, 0.18))，生成时定下，跟人走
+var budget_noise: float = 1.0
+## 景气对购物意向的修正 0.1·g（每次来店时按当旬经济设，不存档）
+var intent_shift: float = 0.0
 
 ## 常用派生参数的直接读写（老代码和测试沿用这些名字）
 var patience_n: int:
@@ -50,8 +55,11 @@ var temper: float:
 var self_serve: float:
 	get: return float(derived.get("self_serve", 0.3))
 	set(v): derived["self_serve"] = v
+## 购物意向 = 性格派生值 + 景气修正，夹到 0.05..1（派生值本身已在这个范围里）
 var intent: float:
-	get: return float(derived.get("intent", 0.5))
+	get:
+		var b := float(derived.get("intent", 0.5))
+		return b if intent_shift == 0.0 else clampf(b + intent_shift, 0.05, 1.0)
 	set(v): derived["intent"] = v
 var hesitation: float:
 	get: return float(derived.get("hesitation", 0.3))
@@ -95,9 +103,18 @@ static func generate(id_: String, econ: Dictionary, trend: Dictionary, rng: Game
 	c.personality = Personality.roll_vector(c.archetype, rng)
 	c.derived = Personality.derive(c.personality, rng)
 	c.careless = clampf(rng.randfn(0.3, 0.2), 0.0, 1.0)
-	c.budget_mult = float(econ["consumption_level"]) * exp(rng.randfn(0.0, 0.18))
+	c.budget_noise = exp(rng.randfn(0.0, 0.18))
+	c.apply_economy(econ)
 	c.expectations = roll_expectations(int(c.derived["n_expect"]), econ, trend, rng)
 	return c
+
+
+## 按当旬经济定预算倍率和购物意向修正（09 §3.3）。新客人生成时、常客回来时各调一次。
+func apply_economy(econ: Dictionary) -> void:
+	var G := float(econ.get("G", econ.get("consumption_level", 1.0)))
+	var spend := float(econ.get("spending_power", pow(G, EconomyState.SPEND_ELASTICITY)))
+	budget_mult = spend * float(econ.get("price_level", 1.0)) * budget_noise
+	intent_shift = 0.1 * (G - 1.0)
 
 
 ## 第一条按趋势 + 本季材质采样；后面几条多半是第一条换个颜色或图案，偶尔完全另起。
@@ -148,6 +165,7 @@ func to_dict() -> Dictionary:
 		"id": id, "kind": kind, "is_regular": is_regular, "visits": visits, "archetype": archetype,
 		"personality": personality.duplicate(), "careless": careless, "derived": derived.duplicate(),
 		"expectations": expectations.duplicate(true), "budget_mult": budget_mult,
+		"budget_noise": budget_noise,
 	}
 
 
@@ -174,4 +192,6 @@ static func from_dict(d: Dictionary) -> CustomerProfile:
 		if not e.has("weight"):
 			e["weight"] = DEFAULT_WEIGHT.duplicate()
 	c.budget_mult = float(d.get("budget_mult", 1.0))
+	# 老存档的预算倍率 = 消费水平 × 个人噪声，消费水平当时在 1 附近，直接当个人噪声用
+	c.budget_noise = float(d.get("budget_noise", c.budget_mult))
 	return c

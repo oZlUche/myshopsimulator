@@ -6,7 +6,8 @@ extends RefCounted
 
 ## 客人观察（02 §2.3 → 06 §4）：Lv1 第一条想要的；Lv2 剩余耐心次数；Lv3 预算；Lv4 两三个性格词；Lv5 回头倾向。
 ## patience_left 为正在讲价时剩几次（−1 表示还没讲价，按他的耐心总数说）。
-static func customer_hint(c: CustomerProfile, player: PlayerState, sku_for_budget: String = "", patience_left: int = -1) -> Dictionary:
+## price_level 为当前物价 π：预算宽不宽裕跟名义标准价比。
+static func customer_hint(c: CustomerProfile, player: PlayerState, sku_for_budget: String = "", patience_left: int = -1, price_level: float = 1.0) -> Dictionary:
 	var lv := player.skill_level("customer_observation")
 	var prec := SkillSystem.precision_cap(player)
 	var a := DataDB.attributes()
@@ -22,7 +23,7 @@ static func customer_hint(c: CustomerProfile, player: PlayerState, sku_for_budge
 		h["patience"] = ("还能磨 %d 次" % patience_left) if patience_left >= 0 else ("大概能磨 %d 次" % c.patience_n)
 	if lv >= 3 and sku_for_budget != "":
 		var r := c.reserve_price(sku_for_budget)
-		h["budget"] = ["预算不太宽裕" if r < float(DataDB.sku(sku_for_budget)["base_price"]) else "预算挺足",
+		h["budget"] = ["预算不太宽裕" if r < float(DataDB.sku(sku_for_budget)["base_price"]) * price_level else "预算挺足",
 			"约 %d–%d 元" % [roundi(r * 0.85), roundi(r * 1.15)], "%d 元" % roundi(r)][prec]
 	if lv >= 4:
 		var words := Personality.describe(c.personality)
