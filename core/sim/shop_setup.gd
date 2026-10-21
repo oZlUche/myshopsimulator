@@ -10,16 +10,26 @@ const WAREHOUSE_SIZE := Vector2i(6, 5)
 ## 仓库与店之间走一趟（秒，1x）。开车小游戏做好前用手推车代替（07 §3）。
 const TRIP_SECONDS := 60.0
 const PREVIEW_CASH := 3000.0
+## 店面、仓库租约期（旬，09 §1.5）
+const RENT_TERM := 36
 
 
 ## 租下店面（7×5）和仓库（6×5）。临街那排是 gy = h−1，门开在中间。
 static func rent_rooms(s: GameState) -> void:
 	var inv := s.inventory
 	inv.add_room(SHOP, "Shop", SHOP_SIZE.x, SHOP_SIZE.y, {
-		"door": [3, 4], "stand": [5, 2], "counter": [5, 3], "traffic": ShopSession.DEFAULT_TRAFFIC, "rent_per_m2": 6.0})
+		"door": [3, 4], "stand": [5, 2], "counter": [5, 3], "traffic": ShopSession.DEFAULT_TRAFFIC, "rent_per_m2": 6.0,
+		"rent_contract": rent_contract(s, 6.0)})
 	inv.add_room(WAREHOUSE, "Warehouse", WAREHOUSE_SIZE.x, WAREHOUSE_SIZE.y, {
-		"door": [1, 4], "unload": [[2, 4], [3, 4]], "rent_per_m2": 2.0, "humidity": 0.55})
+		"door": [1, 4], "unload": [[2, 4], [3, 4]], "rent_per_m2": 2.0, "humidity": 0.55,
+		"rent_contract": rent_contract(s, 2.0)})
 	inv.install_equipment("shop_counter", SHOP, Vector2i(5, 3))
+
+
+## 租约（09 §1.5、§6）：签约这旬按租金目标指数 ρ_target 定名义单价，合同期内不变。预览版还不扣房租。
+static func rent_contract(s: GameState, rent_per_m2_real: float) -> Dictionary:
+	return {"rent_per_m2_nominal": snappedf(rent_per_m2_real * s.economy.rent_index_target, 0.01),
+		"start_period": s.clock.period, "end_period": s.clock.period + RENT_TERM - 1}
 
 
 ## 预览开局（07 §5）：现金、两个货架、一个货柜、一个橱窗、两个仓库货架、手推车；

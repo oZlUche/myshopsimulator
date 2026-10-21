@@ -244,3 +244,12 @@ func test_open_pack_and_pass_time() -> void:
 	assert_eq(cab.packages[-1].items.size(), Wholesale.PACK_SIZE - 1)
 	ShopSession.pass_time(s, StallSession.PERIOD_SECONDS * 0.25)
 	assert_near(s.clock.time_of_period, 0.25)
+
+
+func test_preview_rooms_carry_rent_contract() -> void:
+	var s := GameState.new_game(3)
+	s.economy.rent_index_target = 1.1
+	ShopSetup.rent_rooms(s)
+	var c: Dictionary = s.inventory.locations[ShopSetup.SHOP]["rent_contract"]
+	assert_near(float(c["rent_per_m2_nominal"]), 6.6, 0.001, "签约单价 = 实际单价 × ρ_target")
+	assert_eq(int(c["end_period"]) - int(c["start_period"]) + 1, ShopSetup.RENT_TERM, "36 旬一签")
