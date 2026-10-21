@@ -5,10 +5,12 @@ extends RefCounted
 ## 景气 G = Base + C 是主驱动，物价 π、运力 F、材质供给冲击 M_m 等宏观状态每旬由 period_step 更新（09 §1、§2）。
 
 const OBS_WINDOW := 36
-## 连续循环 C（09 §1.1 v0.2）：每维观测相对自己窗口均值的偏离，按 λ 衰减加权，× 增益后夹到 ±C_MAX；观测不足 C_MIN_OBS 旬时为 0
+## 连续循环 C（09 §1.1 v0.3）：每维观测相对自己基线（窗口里除去最近 6 旬的均值）的偏离，按 λ 衰减加权，× 增益后夹到 ±C_MAX；基线不足 C_MIN_OBS 旬时为 0
 const LAMBDA := 0.88
-const C_GAIN := 0.1
+const C_GAIN := 0.2
 const C_MAX := 0.15
+## 基线不含最近 C_RECENT 旬（09 §1.1 v0.3），否则好转的那几旬会把自己的偏离摊薄
+const C_RECENT := 6
 const C_MIN_OBS := 4
 ## 各维权重与"显著单位"：成交价比动 0.10；成交量、客流相对自己均值动 30%
 const DEV_WEIGHT := {"price_ratio": 0.5, "sales": 0.3, "traffic": 0.2}
@@ -88,19 +90,21 @@ var policy: Dictionary = {
 }
 
 
-## 连续循环 C(t)（09 §1.1 v0.2）：只看"最近比自己过去好还是差"。每维观测减去窗口内（≤36 旬）等权均值，
-## 除以显著单位，三维加权成 dev，再按 λ^i 衰减加权平均，× C_GAIN，夹到 ±C_MAX。玩家一贯卖得便宜或贵不会改变 G。
+## 连续循环 C(t)（09 §1.1 v0.3）：只看"最近比自己过去好还是差"。每维观测减去基线（窗口 ≤36 旬里除去最近 6 旬的等权均值），
+## 除以显著单位，三维加权成 dev，再按 λ^i 衰减加权平均，× C_GAIN，夹到 ±C_MAX。玩家一贯卖得便宜或贵不会改变 G；
+## 好转持续满一个窗口后基线跟上，C 回零。基线不足 4 旬（开局前 10 旬）时 C = 0。
 func continuous_term() -> float:
 	var n: int = mini(observations.size(), OBS_WINDOW)
-	if n < C_MIN_OBS:
+	var base_n := n - C_RECENT
+	if base_n < C_MIN_OBS:
 		return 0.0
 	var recent := observations.slice(observations.size() - n)
 	var mean := {}
 	for k in DEV_WEIGHT:
 		var sum := 0.0
-		for obs in recent:
-			sum += float(obs.get(k, 0.0))
-		mean[k] = sum / n
+		for j in base_n:
+			sum += float(recent[j].get(k, 0.0))
+		mean[k] = sum / base_n
 	var num := 0.0
 	var den := 0.0
 	for i in range(1, n + 1):

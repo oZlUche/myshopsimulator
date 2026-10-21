@@ -189,9 +189,13 @@ func test_wholesale_and_equipment_prices_carry_pi() -> void:
 
 func test_continuous_term_is_decentered() -> void:
 	var e := EconomyState.new()
-	for i in 3:
-		e.push_observation({"price_ratio": 0.5, "sales": 30, "traffic": 300})
-	assert_near(e.continuous_term(), 0.0, 0.0001, "不足 4 旬 C = 0")
+	for i in 4:
+		e.push_observation({"price_ratio": 0.0, "sales": 10, "traffic": 500})
+	for i in 5:
+		e.push_observation({"price_ratio": 0.5, "sales": 30, "traffic": 900})
+	assert_near(e.continuous_term(), 0.0, 0.0001, "开局前 10 旬（基线不足 4 旬）C = 0")
+	e.push_observation({"price_ratio": 0.5, "sales": 30, "traffic": 900})
+	assert_true(e.continuous_term() > 0.0, "第 10 旬起基线够 4 旬，C 开始起作用")
 	var cheap := EconomyState.new()
 	for i in 30:
 		cheap.push_observation({"price_ratio": -0.25, "sales": 8, "traffic": 500})
@@ -202,7 +206,10 @@ func test_continuous_term_is_decentered() -> void:
 	for i in 6:
 		boom.push_observation({"price_ratio": 0.0, "sales": 13, "traffic": 650})
 	var c := boom.continuous_term()
-	assert_true(c > 0.02 and c <= EconomyState.C_MAX, "连续 6 旬三维都比自己均值好：C 为正，实际 %f" % c)
+	assert_true(c > 0.09 and c < 0.13, "30 旬平稳后连续 6 旬三维各高 1 个显著单位：C ≈ +0.11，实际 %f" % c)
+	for i in 36:
+		boom.push_observation({"price_ratio": 0.0, "sales": 13, "traffic": 650})
+	assert_near(boom.continuous_term(), 0.0, 0.0001, "好转持续满 36 旬，基线跟上，C 回零")
 	var crash := EconomyState.new()
 	for i in 30:
 		crash.push_observation({"price_ratio": 0.0, "sales": 10, "traffic": 500})
