@@ -34,5 +34,6 @@ jobs:
       - name: Art showcase (draws every sprite and equipment once)
         run: |
           ./godot --headless --path . --script res://tests/tools/art_showcase.gd 2>&1 | tee art.log
-          grep -q "ART_SHOWCASE PASS" art.log
+          ART_TIER=hd ./godot --headless --path . --script res://tests/tools/art_showcase.gd 2>&1 | tee -a art.log
+          test "$(grep -c "ART_SHOWCASE PASS" art.log)" = 2
           ! grep -q "SCRIPT ERROR" art.log

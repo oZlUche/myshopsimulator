@@ -79,10 +79,11 @@ class Showcase extends Control:
 		things.sort_custom(func(a, b): return Iso.depth(a["g"]) < Iso.depth(b["g"]))
 		for th in things:
 			th["f"].call()
-		draw_string(get_theme_default_font(), Vector2(12, 24), "美术陈列室：地面 / 设备 / 人物 4 向 × 4 帧 / 气泡", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color.WHITE)
+		draw_string(get_theme_default_font(), Vector2(12, 24), "美术陈列室（%s）：地面 / 设备 / 人物 4 向 × 4 帧 / 气泡" % Iso.tier, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color.WHITE)
 
 
 func _init() -> void:
+	Iso.set_tier(OS.get_environment("ART_TIER") if OS.has_environment("ART_TIER") else "sd")
 	var sc := Showcase.new()
 	sc.size = Vector2(1280, 720)
 	root.add_child(sc)
@@ -91,7 +92,7 @@ func _init() -> void:
 		await process_frame
 	var dir := OS.get_environment("SHOTS")
 	if dir != "" and DisplayServer.get_name() != "headless":
-		root.get_texture().get_image().save_png("%s/art_showcase.png" % dir)
+		root.get_texture().get_image().save_png("%s/art_showcase_%s.png" % [dir, Iso.tier])
 	var ok := sc.drawn and not Iso.sprite_meta("eq_shop_shelf_sw").is_empty()
-	print("ART_SHOWCASE ", "PASS" if ok else "FAIL")
+	print("ART_SHOWCASE ", "PASS" if ok else "FAIL", " tier=", Iso.tier)
 	quit(0 if ok else 1)

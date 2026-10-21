@@ -33,6 +33,11 @@ var _returning: Array[CustomerProfile] = []
 var _returning_period := -1
 
 
+func _ready() -> void:
+	# 像素资源档位：环境变量 ART_TIER=sd/hd 强制，否则按窗口分辨率自动选（docs/08 §6）
+	Iso.set_tier(OS.get_environment("ART_TIER") if OS.has_environment("ART_TIER") else "auto")
+
+
 func new_game(seed_value: int = -1) -> void:
 	if seed_value < 0:
 		seed_value = int(Time.get_unix_time_from_system())

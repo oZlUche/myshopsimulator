@@ -24,7 +24,7 @@ core/            纯逻辑，不依赖场景（01 §7）
   save/          存档与迁移链
 data/            数据表（JSON，稳定字符串 ID）
 scenes/          表现层（scenes/view/iso.gd 是斜 45° 像素绘制工具）
-assets/sprites/  像素精灵 PNG（由 tools/pixelart/gen_sprites.py 生成，脚本和图都提交；规范见 docs/08）
+assets/sprites/  像素精灵 PNG，标清；assets/sprites_hd/ 是两倍精细的高清档（都由 tools/pixelart/gen_sprites.py 生成，脚本和图都提交；规范见 docs/08）
 tests/           单元测试、存档 fixture、调参工具
 ```
 
