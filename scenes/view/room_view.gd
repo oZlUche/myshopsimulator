@@ -10,8 +10,6 @@ signal cell_clicked(cell: Vector2i)
 const WALL_H := 96.0
 ## 临街那一侧多画几排街面（店面）
 const STREET_ROWS := 2.0
-const FLOOR_A := Color("#4a4458")
-const FLOOR_B := Color("#45404f")
 const WALL_L := Color("#565c78")
 const WALL_R := Color("#4a4f68")
 const CARDBOARD := Color("#b08a5a")
@@ -22,8 +20,8 @@ const BAG_ART_H := 3.0
 var inv: Inventory
 var loc: String = ""
 var show_street := false
-## 屋里的地面：店面是木地板色的格子，仓库是水泥地（lot 贴图）
-var floor_kind := "shop"
+## 屋里的地面贴图（Iso.draw_ground 的 kind）：店面木地板 wood（以后装修可换 tile），仓库水泥地 concrete
+var floor_kind := "wood"
 ## 玩家站的位置（格坐标，可以是小数，走路时插值）
 var player_g := Vector2(0, 0)
 var _player_path: Array[Vector2] = []
@@ -207,10 +205,7 @@ func _draw() -> void:
 				Iso.draw_ground(self, o, Vector2(x, sz.y + r), "pavement" if r == 0 else "road", x * 7 + r * 13, "se" if r == 0 else "")
 	for x in sz.x:
 		for y in sz.y:
-			if floor_kind == "shop":
-				Iso.draw_tile(self, o, Vector2(x, y), FLOOR_A if (x + y) % 2 == 0 else FLOOR_B)
-			else:
-				Iso.draw_ground(self, o, Vector2(x, y), "lot", x * 5 + y * 11)
+			Iso.draw_ground(self, o, Vector2(x, y), floor_kind, x * 5 + y * 11)
 	_draw_walls(o, sz)
 	_draw_marks(o)
 	_draw_ground_frames(o)

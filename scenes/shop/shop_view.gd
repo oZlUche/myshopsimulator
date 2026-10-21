@@ -143,6 +143,7 @@ func step(dt: float) -> void:
 	if session == null:
 		return
 	var spots := _spots()
+	var queue := _counter_queue()
 	var alive := {}
 	for v in session.visitors:
 		var id: String = v["customer"].id
@@ -154,6 +155,7 @@ func step(dt: float) -> void:
 			_actors[id] = {"g": start, "path": [], "spot": Vector2i(-9, -9), "look": Vector2(0, -1), "seed": seed_value, "v": v}
 		var a: Dictionary = _actors[id]
 		a["v"] = v
+		a["qi"] = queue.find(spot) if v["state"] in COUNTER_STATES else -1
 		if a["spot"] != spot:
 			a["spot"] = spot
 			a["path"] = _route(a["g"], spot, a["seed"])
@@ -249,7 +251,7 @@ func _collect_people(things: Array) -> void:
 		things.append({"d": g.x + g.y, "kind": "person", "g": g, "body": fit["top"], "hair": fit["hair"],
 			"style": fit["style"], "pants": fit["pants"], "scarf": fit["scarf"], "facing": fc[0], "back": fc[1],
 			"phase": t + a["seed"] * 0.1 if a.get("moving", false) else 0.0,
-			"tag": "#%d" % visitor_numbers.get(id, 0), "tag_color": col, "visitor": v})
+			"tag": "#%d" % visitor_numbers.get(id, 0), "tag_color": col, "visitor": v, "qi": a.get("qi", -1)})
 	for w in _walkers:
 		var fit := Iso.outfit_full(int(w["seed"]))
 		var dir: Vector2 = w["vel"] if w["path"].is_empty() else w.get("dir", w["vel"])
@@ -265,7 +267,12 @@ func _draw_person_thing(o: Vector2, t: Dictionary) -> void:
 	if v.is_empty():
 		return
 	var p := Iso.to_screen(t["g"], o)
-	var bubble_at := p + Vector2(14, -76)
+	# 柜台前排队的人：站在收银台左边的气泡往左上冒，右边的往右上，不压收银机、也不和旁边那位挤在一起
+	var to_left := false
+	if int(t.get("qi", -1)) >= 0:
+		var counter := Vector2(inv.room_cell(loc, "counter")) + Vector2(0.5, 0.5)
+		to_left = p.x < Iso.to_screen(counter, o).x - 1.0
+	var bubble_at := p + (Vector2(-38, -76) if to_left else Vector2(14, -76))
 	match v["state"]:
 		"asking":
 			Iso.draw_bubble(self, bubble_at, "ask")

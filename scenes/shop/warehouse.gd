@@ -70,7 +70,7 @@ func _build() -> void:
 	_view = RoomView.new()
 	_view.setup(s.inventory, ShopSetup.WAREHOUSE)
 	_view.show_street = true
-	_view.floor_kind = "lot"
+	_view.floor_kind = "concrete"
 	_view.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_view.custom_minimum_size = Vector2(0, 300)
 	left.add_child(_view)
