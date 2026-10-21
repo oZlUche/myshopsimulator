@@ -6,7 +6,8 @@ extends RefCounted
 ##
 ## 像素风：所有精灵都按 PX 倍放大画（1 个美术像素 = PX 个屏幕像素），位置用 snap() 对齐到像素网格，
 ## 外层 draw_set_transform 的缩放请用 0.5 的整数倍，这样像素才不会忽大忽小。
-## 精灵由 tools/pixelart/gen_sprites.py 生成到 assets/sprites/；人物是分层灰度图，按颜色 modulate 上色换装。
+## 精灵由 tools/pixelart/gen_sprites.py 生成到 assets/sprites/（标清）和 assets/sprites_hd/（高清，两倍精细），
+## 人物是分层灰度图，按颜色 modulate 上色换装。档位见 set_tier。
 
 const TW := 64.0
 const TH := 32.0
@@ -24,28 +25,32 @@ const HAIR_STYLES := 7
 ## 发型序号：短发、偏分、波波头、长发、马尾、发髻、鸭舌帽
 enum Hair { SHORT, PARTED, BOB, LONG, PONYTAIL, BUN, CAP }
 
-const T_OUTLINE := preload("res://assets/sprites/person_outline.png")
-const T_SKIN := preload("res://assets/sprites/person_skin.png")
-const T_TOP := preload("res://assets/sprites/person_top.png")
-const T_BOTTOM := preload("res://assets/sprites/person_bottom.png")
-const T_SHOES := preload("res://assets/sprites/person_shoes.png")
-const T_FACE := preload("res://assets/sprites/person_face.png")
-const T_SCARF := preload("res://assets/sprites/person_scarf.png")
-const T_HAIR := preload("res://assets/sprites/hair.png")
-const T_SHADOW := preload("res://assets/sprites/shadow.png")
-const T_FOLD := preload("res://assets/sprites/scarf_fold.png")
-const T_TILES := {
-	"pavement": [preload("res://assets/sprites/tile_pavement_0.png"), preload("res://assets/sprites/tile_pavement_1.png")],
-	"road": [preload("res://assets/sprites/tile_road_0.png"), preload("res://assets/sprites/tile_road_1.png")],
-	"grass": [preload("res://assets/sprites/tile_grass_0.png"), preload("res://assets/sprites/tile_grass_1.png")],
-	"lot": [preload("res://assets/sprites/tile_lot_0.png"), preload("res://assets/sprites/tile_lot_1.png")],
-}
-const T_KERB := {"nw": preload("res://assets/sprites/kerb_nw.png"), "se": preload("res://assets/sprites/kerb_se.png")}
-const T_BUBBLE := {
-	"ask": preload("res://assets/sprites/bubble_ask.png"),
-	"haggle": preload("res://assets/sprites/bubble_haggle.png"),
-	"wait": preload("res://assets/sprites/bubble_wait.png"),
-}
+## 资源档位：sd 标清（1 美术像素 = 2 屏幕像素）/ hd 高清（两倍精细，1 美术像素 = 1 屏幕像素）。
+## 坐标、尺寸、元数据全按标清单位写，S 是当前档位每个标清单位对应的美术像素数，取图时乘上去。
+static var tier := "sd"
+static var S := 1
+static var _tex_cache: Dictionary = {}
+
+
+## "sd" / "hd" / "auto"：auto 按窗口高度选，1440p 及以上用高清（这时一个标清单位 ≥ 2 个物理像素，高清图才有地方发挥）。
+static func set_tier(t: String) -> void:
+	if t == "auto":
+		var h := 720
+		if DisplayServer.get_name() != "headless":
+			h = DisplayServer.window_get_size().y
+		t = "hd" if h >= 1300 else "sd"
+	if t != "hd":
+		t = "sd"
+	tier = t
+	S = 2 if t == "hd" else 1
+	_tex_cache.clear()
+
+
+static func sprite_tex(name: String) -> Texture2D:
+	var key := tier + "/" + name
+	if not _tex_cache.has(key):
+		_tex_cache[key] = load("res://assets/%s/%s.png" % ["sprites_hd" if tier == "hd" else "sprites", name])
+	return _tex_cache[key]
 
 
 static func to_screen(g: Vector2, origin: Vector2) -> Vector2:
@@ -81,12 +86,13 @@ static func draw_tile(ci: CanvasItem, origin: Vector2, g: Vector2, col: Color, w
 ## 一格地面贴图。kind：pavement 人行道 / road 街面 / grass 花坛 / lot 空地；variant 换一张花色。
 ## kerb 为 "nw" / "se" 时在这格靠那条边上叠一道路缘石（人行道挨着街的那条边）。
 static func draw_ground(ci: CanvasItem, origin: Vector2, g: Vector2, kind: String, variant := 0, kerb := "") -> void:
-	var tiles: Array = T_TILES.get(kind, T_TILES["pavement"])
-	var tex: Texture2D = tiles[absi(variant) % tiles.size()]
+	if not kind in ["pavement", "road", "grass", "lot"]:
+		kind = "pavement"
+	var tex := sprite_tex("tile_%s_%d" % [kind, absi(variant) % 2])
 	var p := snap(to_screen(g, origin) - Vector2(TW * 0.5, 0))
 	ci.draw_texture_rect(tex, Rect2(p, Vector2(TW, TH)), false)
-	if kerb != "" and T_KERB.has(kerb):
-		ci.draw_texture_rect(T_KERB[kerb], Rect2(p, Vector2(TW, TH)), false)
+	if kerb == "nw" or kerb == "se":
+		ci.draw_texture_rect(sprite_tex("kerb_" + kerb), Rect2(p, Vector2(TW, TH)), false)
 
 
 ## 方块：占地 w×d 格，高 h 像素。顶面亮、朝左前的面原色、朝右前的面暗，看起来有体积。
@@ -118,7 +124,7 @@ static func draw_face_rect(ci: CanvasItem, origin: Vector2, g: Vector2, w: float
 
 static func draw_shadow(ci: CanvasItem, foot: Vector2, rx: float, ry: float, a := 0.3) -> void:
 	var size := snap(Vector2(maxf(rx * 2.0, PX * 2), maxf(ry * 2.0, PX)))
-	ci.draw_texture_rect(T_SHADOW, Rect2(snap(foot - size * 0.5), size), false, Color(1, 1, 1, a))
+	ci.draw_texture_rect(sprite_tex("shadow"), Rect2(snap(foot - size * 0.5), size), false, Color(1, 1, 1, a))
 
 
 ## 摊桌：四条腿的木板桌，铺一块桌布垂到两面。占地 w×d 格，桌面高 h 像素。
@@ -156,17 +162,18 @@ static func draw_stall_table(ci: CanvasItem, origin: Vector2, g: Vector2, w: flo
 ## 叠好的一份围巾（侧面能看到颜色）：bottom 是这份货的底边中点。一叠往上摞时每层高 FOLD_STEP。
 const FOLD_STEP := 2.0 * PX
 static func draw_scarf_fold(ci: CanvasItem, bottom: Vector2, col: Color, jitter := 0) -> void:
-	var size := Vector2(T_FOLD.get_width(), T_FOLD.get_height()) * PX
+	var tex := sprite_tex("scarf_fold")
+	var size := Vector2(tex.get_width(), tex.get_height()) / S * PX
 	var p := snap(bottom - Vector2(size.x * 0.5, size.y)) + Vector2(float(jitter % 3 - 1) * PX, 0)
-	ci.draw_texture_rect(T_FOLD, Rect2(p, size), false, col)
+	ci.draw_texture_rect(tex, Rect2(p, size), false, col)
 
 
 ## 客人头顶的气泡：kind = ask 问价 / haggle 讲价 / wait 等货。pos 是气泡左上角。
 static func draw_bubble(ci: CanvasItem, pos: Vector2, kind: String, a := 1.0) -> void:
-	if not T_BUBBLE.has(kind):
+	if not kind in ["ask", "haggle", "wait"]:
 		return
-	var tex: Texture2D = T_BUBBLE[kind]
-	ci.draw_texture_rect(tex, Rect2(snap(pos), Vector2(tex.get_width(), tex.get_height()) * PX), false, Color(1, 1, 1, a))
+	var tex := sprite_tex("bubble_" + kind)
+	ci.draw_texture_rect(tex, Rect2(snap(pos), Vector2(tex.get_width(), tex.get_height()) / S * PX), false, Color(1, 1, 1, a))
 
 
 ## 大头小身的像素小人，脚底在 foot。facing：+1 朝右前，-1 朝左前；back=true 背对镜头（看不到脸）。
@@ -185,8 +192,8 @@ static func draw_person(ci: CanvasItem, foot: Vector2, body: Color, hair: Color,
 	var size := Vector2(FW, FH) * px
 	var pos := snap(foot - Vector2(FW * 0.5, FOOT_Y) * px)
 	var dst := Rect2(pos, size)
-	var src := Rect2(Vector2(frame * FW, dir * FH), Vector2(FW, FH))
-	var hsrc := Rect2(Vector2(frame * FW, (style * 4 + dir) * FH), Vector2(FW, FH))
+	var src := Rect2(Vector2(frame * FW, dir * FH) * S, Vector2(FW, FH) * S)
+	var hsrc := Rect2(Vector2(frame * FW, (style * 4 + dir) * FH) * S, Vector2(FW, FH) * S)
 	var white := Color(1, 1, 1, a)
 	if pants.a <= 0.0:
 		pants = body.darkened(0.45)
@@ -194,16 +201,16 @@ static func draw_person(ci: CanvasItem, foot: Vector2, body: Color, hair: Color,
 	var skin := SKIN
 	skin.a = a
 	hair.a = a
-	ci.draw_texture_rect_region(T_OUTLINE, dst, hsrc, white)
-	ci.draw_texture_rect_region(T_SKIN, dst, src, skin)
-	ci.draw_texture_rect_region(T_TOP, dst, src, body)
-	ci.draw_texture_rect_region(T_BOTTOM, dst, src, pants)
-	ci.draw_texture_rect_region(T_SHOES, dst, src, white)
-	ci.draw_texture_rect_region(T_HAIR, dst, hsrc, hair)
-	ci.draw_texture_rect_region(T_FACE, dst, src, white)
+	ci.draw_texture_rect_region(sprite_tex("person_outline"), dst, hsrc, white)
+	ci.draw_texture_rect_region(sprite_tex("person_skin"), dst, src, skin)
+	ci.draw_texture_rect_region(sprite_tex("person_top"), dst, src, body)
+	ci.draw_texture_rect_region(sprite_tex("person_bottom"), dst, src, pants)
+	ci.draw_texture_rect_region(sprite_tex("person_shoes"), dst, src, white)
+	ci.draw_texture_rect_region(sprite_tex("hair"), dst, hsrc, hair)
+	ci.draw_texture_rect_region(sprite_tex("person_face"), dst, src, white)
 	if scarf.a > 0.0:
 		scarf.a *= a
-		ci.draw_texture_rect_region(T_SCARF, dst, src, scarf)
+		ci.draw_texture_rect_region(sprite_tex("person_scarf"), dst, src, scarf)
 
 
 ## 人物在屏幕上占的范围（点击判定用）：脚底在 foot。
@@ -250,7 +257,6 @@ static func outfit_full(seed_value: int) -> Dictionary:
 ## size 图的美术像素尺寸、anchor 地面菱形最上角在图里的位置、H 高度（美术像素）、tiers 每层层板高度、slot 放货的格内偏移。
 
 static var _equip_meta: Dictionary = {}
-static var _tex_cache: Dictionary = {}
 
 
 static func sprite_meta(name: String) -> Dictionary:
@@ -261,12 +267,6 @@ static func sprite_meta(name: String) -> Dictionary:
 			if parsed is Dictionary:
 				_equip_meta = parsed
 	return _equip_meta.get(name, {})
-
-
-static func sprite_tex(name: String) -> Texture2D:
-	if not _tex_cache.has(name):
-		_tex_cache[name] = load("res://assets/sprites/%s.png" % name)
-	return _tex_cache[name]
 
 
 ## 画一张带锚点的精灵：地面菱形最上角对到格坐标 g，再往上抬 up 个美术像素（放在层板上用）。

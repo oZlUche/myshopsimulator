@@ -32,13 +32,14 @@ LIT, SHADE, DEEP = 255, 190, 140
 
 
 class Layer:
-    """一帧里的一层：(x, y) -> 灰度值。"""
+    """一帧里的一层：(x, y) -> 灰度值。w/h 是帧的尺寸（高清帧更大）。"""
 
-    def __init__(self):
+    def __init__(self, w=FW, h=FH):
+        self.w, self.h = w, h
         self.px = {}
 
     def put(self, x, y, v=LIT):
-        if 0 <= x < FW and 0 <= y < FH:
+        if 0 <= x < self.w and 0 <= y < self.h:
             self.px[(x, y)] = v
 
     def rect(self, x0, y0, x1, y1, v=LIT):
@@ -47,23 +48,35 @@ class Layer:
                 self.put(x, y, v)
 
     def shift(self, dx, dy):
-        n = Layer()
+        n = Layer(self.w, self.h)
         for (x, y), v in self.px.items():
             n.put(x + dx, y + dy, v)
         return n
 
     def mirror(self):
-        n = Layer()
+        n = Layer(self.w, self.h)
         for (x, y), v in self.px.items():
-            n.put(FW - 1 - x, y, v)
+            n.put(self.w - 1 - x, y, v)
         return n
 
     def minus(self, other):
-        n = Layer()
+        n = Layer(self.w, self.h)
         for k, v in self.px.items():
             if k not in other.px:
                 n.px[k] = v
         return n
+
+    def upscale(self, s):
+        """每个像素放大成 s×s，坐标也放大 s 倍（高清版的底子）。"""
+        n = Layer(self.w * s, self.h * s)
+        for (x, y), v in self.px.items():
+            for dy in range(s):
+                for dx in range(s):
+                    n.put(x * s + dx, y * s + dy, v)
+        return n
+
+    def __contains__(self, p):
+        return p in self.px
 
 
 def head_mask():
@@ -233,7 +246,7 @@ def outline_of(layers):
     sil = set()
     for l in layers:
         sil |= set(l.px.keys())
-    o = Layer()
+    o = Layer(layers[0].w, layers[0].h)
     for (x, y) in sil:
         for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
             p = (x + dx, y + dy)
@@ -452,6 +465,8 @@ def generate():
     import gen_equipment
     gen_equipment.generate(OUT)
     print("wrote sprites to", OUT)
+    import gen_hd
+    gen_hd.generate(os.path.join(ROOT, "assets", "sprites_hd"))
 
 
 # ---------------------------------------------------------------- 预览（不进游戏，只是看效果）
