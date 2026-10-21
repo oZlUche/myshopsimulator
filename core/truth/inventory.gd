@@ -48,6 +48,23 @@ func slots_of_type(type: String) -> Array[Slot]:
 	return out
 
 
+## 玩家手上：从堆顶拿下来、从中间抽出来的货先拿在手里，再放到某个堆顶（03 §4）。
+## 用到时才创建，老存档里没有也没关系。
+const HAND_ID := "hand_player"
+const HAND_MAX := 3
+
+
+func hand() -> Slot:
+	if not slots.has(HAND_ID):
+		var h := Slot.new()
+		h.id = HAND_ID
+		h.type = "Hand"
+		h.location_id = "player"
+		h.stack.max_height = HAND_MAX
+		slots[h.id] = h
+	return slots[HAND_ID]
+
+
 ## 安装设备 = 向场所注入一组槽位（01 §4.9）。返回设备实例 ID。
 func install_equipment(def_id: String, location_id: String) -> String:
 	var def: Dictionary = DataDB.equipment().get(def_id, {})

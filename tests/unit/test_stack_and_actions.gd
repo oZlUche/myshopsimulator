@@ -211,3 +211,71 @@ func test_old_item_without_pull_fields_loads() -> void:
 	assert_near(it.pull_out, 0.0)
 	assert_eq(it.gap_below, 0)
 	assert_true(not it.to_dict().has("pull"), "没动过的货不写 pull 字段")
+
+
+func test_pull_never_gets_stuck() -> void:
+	# 上面再重、手法再差，一直拖也一定能带出来（03 §2.0），只是慢
+	var worst := PullPhysics.follow_ratio(20.0, 90.0, "center")
+	assert_true(worst >= PullPhysics.MIN_FOLLOW, str(worst))
+	assert_true(PullPhysics.follow_ratio(0.0, 40.0, "corner") > worst)
+
+
+func test_collapse_risk_rewards_care() -> void:
+	# 小心抽：上面压 6 份也基本不塌；糙手法：上面压 2 份就有明显风险
+	var d_careful := PullPhysics.deviation_from_input(ActionAPI.CAREFUL_PULL)
+	assert_true(PullPhysics.collapse_probability(d_careful, 6) < 0.06, str(PullPhysics.collapse_probability(d_careful, 6)))
+	assert_true(PullPhysics.collapse_probability(1.5, 2) > 0.4, str(PullPhysics.collapse_probability(1.5, 2)))
+
+
+func test_take_top_never_collapses_and_fills_hand() -> void:
+	var s := _state()
+	var api := ActionAPI.new(s)
+	var table := _table_with(s, api, 3)
+	var hand := s.inventory.hand()
+	var top_id := table.stack.top().id
+	var it := api.take_top_to_hand(table.id)
+	assert_eq(it.id, top_id)
+	api.take_top_to_hand(table.id)
+	api.take_top_to_hand(table.id)
+	assert_eq(table.stack.height(), 0)
+	assert_eq(table.stack.collapsed_pile.size(), 0)
+	assert_eq(hand.stack.height(), 3)
+	# 手上满了就拿不了
+	var t2: Slot = s.inventory.slots_of_type("StallTable")[1]
+	api.place_on_top(s.inventory.create_item("scarf_solid_red_wool"), t2.id)
+	assert_true(api.take_top_to_hand(t2.id) == null)
+	# 收摊时手上的货也回到行囊
+	var bag_before := s.inventory.count_items("", "Bag")
+	assert_eq(api.pack_up(), 0)
+	assert_eq(s.inventory.count_items("", "Bag"), bag_before + 4)
+	assert_eq(hand.stack.height(), 0)
+
+
+func test_npc_fetch_by_personality() -> void:
+	var tops := 0
+	var top_collapses := 0
+	var pulls := 0
+	for k in 20:
+		var s := _state()
+		s.rng = GameRng.new(1000 + k)
+		var api := ActionAPI.new(s)
+		var table := _table_with(s, api, 3)
+		var target := table.stack.items[0]
+		var r := api.npc_fetch(table.id, 0, {"patience": 0.95, "careless": 0.05, "first_visit": false})
+		assert_eq(r["item"].id, target.id)
+		if r["method"] == "top":
+			tops += 1
+			if r["collapsed"] or not table.stack.collapsed_pile.is_empty():
+				top_collapses += 1
+			# 上面那两份被随手放到别的摊位格堆顶
+			assert_eq(table.stack.height(), 0)
+			assert_true(r["seconds"] > ActionAPI.NPC_PULL_SECONDS)
+		var s2 := _state()
+		s2.rng = GameRng.new(2000 + k)
+		var api2 := ActionAPI.new(s2)
+		var t2 := _table_with(s2, api2, 3)
+		if api2.npc_fetch(t2.id, 0, {"patience": 0.05, "careless": 0.95, "first_visit": true})["method"] == "pull":
+			pulls += 1
+	assert_true(tops >= 15, "谨慎的多数拆顶：%d" % tops)
+	assert_eq(top_collapses, 0)
+	assert_true(pulls >= 15, "马虎的多数直接抽：%d" % pulls)

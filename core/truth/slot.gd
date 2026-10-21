@@ -2,7 +2,7 @@ class_name Slot
 extends RefCounted
 ## 持有一个货堆的位置（01 §4.1）。
 
-const TYPES := ["WarehouseShelf", "ShopBackroom", "ShopDisplay", "CarTrunk", "StallTable", "Bag"]
+const TYPES := ["WarehouseShelf", "ShopBackroom", "ShopDisplay", "CarTrunk", "StallTable", "Bag", "Hand"]
 
 var id: String
 var type: String

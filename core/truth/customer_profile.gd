@@ -62,6 +62,11 @@ func reserve_price(sku_id: String, match_tolerance: float = 0.0) -> float:
 	return float(s["base_price"]) * budget_mult * lerpf(0.55, 1.15, m)
 
 
+## 拿货 / 抽货时的执行者画像（03 §5）。
+func to_actor_profile() -> Dictionary:
+	return {"careless": careless, "patience": patience, "first_visit": visits == 0 and not is_regular, "skill": 0.0}
+
+
 func to_dict() -> Dictionary:
 	return {
 		"id": id, "kind": kind, "is_regular": is_regular, "preference": preference.duplicate(),

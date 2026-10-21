@@ -124,9 +124,9 @@ func _best_item_for(c: CustomerProfile) -> Dictionary:
 	return best
 
 
-## 客人看中的那份货现在在哪：{slot_id, index}；已不在摊位上则为空。
+## 客人看中的那份货现在在哪：{slot_id, index}；已不在摊位上（也不在你手上）则为空。
 func locate(item_id: String) -> Dictionary:
-	for sl in s.inventory.slots_of_type("StallTable"):
+	for sl in s.inventory.slots_of_type("StallTable") + s.inventory.slots_of_type("Hand"):
 		var idx := sl.stack.index_of(item_id)
 		if idx >= 0:
 			return {"slot_id": sl.id, "index": idx}
