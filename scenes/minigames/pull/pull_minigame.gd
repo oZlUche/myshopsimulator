@@ -102,10 +102,12 @@ func drag_step(m: Vector2, dt: float) -> void:
 		var v_hand := hand.length() / maxf(dt, 0.001)
 		var v_item := PullPhysics.item_speed(v_hand, stack.weight_above(index), theta, _point)
 		var step := hand.normalized() * v_item * dt
-		# 货只能顺着已经抽出的方向往外走，往回推不动（不会缩回）
-		var dx := step.x / BAR_W
-		if _out != 0.0 and signf(dx) != signf(_out):
-			dx = 0.0
+		# 货沿着抽出的方向走，手往外拖多远（按跟手比例打折）它就出来多远；
+		# 只要一直拖就一定能带出，手法差只是更慢、更容易塌（03 §2.0）。往回推不动，不会缩回。
+		var dir := signf(_out) if _out != 0.0 else signf(hand.x)
+		var dx := 0.0
+		if dir != 0.0 and signf(hand.x) != -dir:
+			dx = dir * v_item * dt / BAR_W
 		_out = clampf(_out + dx, -ActionAPI.PULL_DONE, ActionAPI.PULL_DONE)
 		_seg_shift += dx
 		# 往上带一点，往下压不动

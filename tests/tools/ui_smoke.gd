@@ -57,28 +57,41 @@ func _init() -> void:
 	G.goto("stall")
 	for i in 5: await process_frame
 	var st = scene()
+	var hand = s.inventory.hand()
+	# 摆货：点行囊堆顶拿到手上，再点摊位格空处放下
 	for t in s.inventory.slots_of_type("StallTable"):
 		for b in s.inventory.slots_of_type("Bag"):
 			while not t.stack.is_full() and b.stack.height() > 0:
-				st._selected = {"slot_id": b.id, "index": b.stack.height()-1}
+				st._on_top(b.id)
 				st._on_slot(t.id)
+	assert(hand.stack.height() == 0)
 	st._on_peek(s.inventory.slots_of_type("StallTable")[0].id, 0)
-	# 抽取小游戏：从第 1 格最底下抽一份放到第 3 格
 	var tables = s.inventory.slots_of_type("StallTable")
+	# 从顶部拿：连点两下拿两份到手上，不开小游戏，不会塌；再放回去
+	var h0 = tables[1].stack.height()
+	st._on_top(tables[1].id)
+	st._on_top(tables[1].id)
+	assert(st._minigame == null and hand.stack.height() == mini(2, h0))
+	await shot("3a_hand")
+	while hand.stack.height() > 0:
+		st._on_slot(tables[1].id)
+	assert(tables[1].stack.height() == h0)
+	# 抽取小游戏：点第 1 格最底下那份的侧面，抽到手上，再放到第 3 格
 	var before = tables[0].stack.height()
-	st._selected = {"slot_id": tables[0].id, "index": 0}
-	st._on_slot(tables[2].id)
+	st._on_strip(tables[0].id, 0)
 	assert(st._minigame != null, "从堆底抽货应弹出小游戏")
 	await good_pull(st, true)
 	assert(st._minigame == null, "好手法应能把货拉出来")
+	assert(hand.stack.height() == 1)
+	st._on_slot(tables[2].id)
+	assert(hand.stack.height() == 0)
 	assert(tables[0].stack.height() + tables[0].stack.collapsed_pile.size() == before - 1)
 	# 拉一半停手：货停在外面不缩回；再打开接着拉，累计过半就抽出来
 	var t1 = tables[1]
 	if t1.stack.height() >= 2 and not tables[2].stack.is_full():
 		var h1 = t1.stack.height()
 		var target = t1.stack.items[0]
-		st._selected = {"slot_id": t1.id, "index": 0}
-		st._on_slot(tables[2].id)
+		st._on_strip(t1.id, 0)
 		await good_pull(st, false, 9)
 		var release = InputEventMouseButton.new()
 		release.button_index = MOUSE_BUTTON_LEFT
@@ -90,11 +103,11 @@ func _init() -> void:
 		assert(t1.stack.height() + t1.stack.collapsed_pile.size() == h1, "停手不该把货抽走")
 		assert(target.pull_out < 0.0 and target.pull_out > -0.5, "停手后货停在外面 %f" % target.pull_out)
 		await shot("3d_stack_after_pause")
-		st._selected = {"slot_id": t1.id, "index": 0}
-		st._on_slot(tables[2].id)
+		st._on_strip(t1.id, 0)
 		assert(is_equal_approx(st._minigame._out, target.pull_out), "再打开应接着上次的进度")
 		await good_pull(st)
 		assert(st._minigame == null)
+		st._on_slot(tables[2].id)
 		assert(t1.stack.height() + t1.stack.collapsed_pile.size() == h1 - 1)
 		await shot("3e_gap_after_pull")
 	st._on_main_button()

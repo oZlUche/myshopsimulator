@@ -12,6 +12,10 @@ const PULL_DONE := 0.5
 ## 目标每被拉出 1 个货长，上一层被带着横移的比例（再往上逐层叠加）
 const ABOVE_DRAG := 0.08
 const MAX_SHIFT := 0.25
+## 从顶部拿一份 / 往堆顶放一份的固定耗时（秒，03 §2.1）
+const TAKE_TOP_SECONDS := 0.5
+## NPC 从中间抽一份的耗时（秒）
+const NPC_PULL_SECONDS := 2.0
 
 var s: GameState
 
@@ -150,11 +154,52 @@ func pull_item(slot_id: String, index: int, pull_input: Dictionary = CAREFUL_PUL
 	return res
 
 
-func take_top(slot_id: String) -> ScarfItem:
+## 从顶部拿一份（03 §2.1）：最上面那份直接拿起，不判定、不会塌，固定耗时 TAKE_TOP_SECONDS。
+func take_top(slot_id: String, _actor: String = "player") -> ScarfItem:
 	var sl := _slot(slot_id)
 	if sl == null or sl.stack.height() == 0:
 		return null
-	return pull_item(slot_id, sl.stack.height() - 1)["item"]
+	return pull_item(slot_id, sl.stack.height() - 1, {"resolved": true})["item"]
+
+
+## 从一个堆顶拿一份到手上；手上满了返回 null。
+func take_top_to_hand(slot_id: String) -> ScarfItem:
+	var h := s.inventory.hand()
+	if h.stack.is_full() or slot_id == h.id:
+		return null
+	var it := take_top(slot_id)
+	if it != null:
+		place_on_top(it, h.id)
+	return it
+
+
+## NPC（客人自取 / 员工）去拿堆里第 index 份（03 §5）：按性格选拿法。
+## 拆顶：把上面的货一份份拿下来，随手放到同类的邻近堆顶（乱度上升），再拿目标，不会塌；
+## 邻近堆都放不下时只能硬抽。抽：按执行者属性采样偏差，走同一个倒塌判定。
+## 返回 {item, method: "top" | "pull", seconds, collapsed, displaced}。
+func npc_fetch(slot_id: String, index: int, profile: Dictionary) -> Dictionary:
+	var sl := _slot(slot_id)
+	if sl == null or index < 0 or index >= sl.stack.height():
+		return {"item": null, "method": "", "seconds": 0.0, "collapsed": false, "displaced": false}
+	var n_above := sl.stack.count_above(index)
+	if n_above > 0 and PHYSICS_SLOT_TYPES.has(sl.type) and PullPhysics.prefers_take_from_top(profile, s.rng):
+		var others := s.inventory.slots_in(sl.location_id, sl.type).filter(func(o): return o.id != slot_id)
+		var room := 0
+		for o in others:
+			room += o.stack.max_height - o.stack.height()
+		if room >= n_above:
+			var target: ScarfItem = sl.stack.items[index]
+			for i in n_above:
+				var it := take_top(slot_id)
+				for o in others:
+					if place_on_top(it, o.id):
+						break
+			var r := pull_item(slot_id, sl.stack.index_of(target.id), {"resolved": true})
+			return {"item": r["item"], "method": "top", "seconds": TAKE_TOP_SECONDS * (2 * n_above + 1),
+				"collapsed": false, "displaced": false}
+	var res := pull_item(slot_id, index, CAREFUL_PULL, profile)
+	return {"item": res["item"], "method": "pull", "seconds": NPC_PULL_SECONDS,
+		"collapsed": res["collapsed"], "displaced": res["displaced"]}
 
 
 ## 在两个槽位之间挪一份货：抽出后只能放到目标堆顶（03 §4）。
@@ -254,7 +299,7 @@ func sell(slot_id: String, index: int, price: float, customer: CustomerProfile, 
 ## 收摊：摊位上的货（含地上的）全部收回行囊。返回装不下而被丢掉的件数。
 func pack_up() -> int:
 	var lost := 0
-	for sl in s.inventory.slots_of_type("StallTable"):
+	for sl in s.inventory.slots_of_type("StallTable") + s.inventory.slots_of_type("Hand"):
 		var all: Array[ScarfItem] = []
 		all.append_array(sl.stack.items)
 		all.append_array(sl.stack.collapsed_pile)

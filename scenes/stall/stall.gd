@@ -22,7 +22,6 @@ var _log: RichTextLabel
 var _main_button: Button
 var _speed_box: HBoxContainer
 
-var _selected := {"slot_id": "", "index": -1}
 var _haggle: HaggleState
 var _haggle_visitor: Dictionary = {}
 var _next_number := 1
@@ -39,7 +38,8 @@ func _ready() -> void:
 	session.visitor_arrived.connect(_on_visitor_arrived)
 	session.visitor_left.connect(_on_visitor_left)
 	_build()
-	_say("找好位置了。先把行囊里的货摆到摊位上（左键选中一份，再点摊位格的空处），然后开张。时间还没开始走。")
+	_say("找好位置了。先把行囊里的货摆到摊位上，然后开张。时间还没开始走。")
+	_say("点堆顶那份的顶面：从顶部拿一份到手上，不会塌；点下面某份的侧面：从中间抽，抽不好上面会塌。再点某一格的空处，把手上的货放到那堆顶上。")
 	_refresh_all()
 
 
@@ -156,16 +156,18 @@ func _refresh_slots() -> void:
 	var highlight := ""
 	if not _haggle_visitor.is_empty():
 		highlight = _haggle_visitor["item_id"]
-	for pair in [[_table_box, "StallTable", "摊位"], [_bag_box, "Bag", "行囊"]]:
+	s.inventory.hand()
+	for pair in [[_table_box, "StallTable", "摊位"], [_bag_box, "Bag", "行囊"], [_bag_box, "Hand", "手上"]]:
 		var box: HBoxContainer = pair[0]
-		UIKit.clear(box)
+		if pair[1] != "Hand":
+			UIKit.clear(box)
 		var n := 1
 		for sl in s.inventory.slots_of_type(pair[1]):
-			var v := StackView.new().setup(sl, "%s %d" % [pair[2], n])
+			var title: String = "手上（最多 %d 份）" % Inventory.HAND_MAX if pair[1] == "Hand" else "%s %d" % [pair[2], n]
+			var v := StackView.new().setup(sl, title)
 			n += 1
 			v.highlight_item_id = highlight
-			if sl.id == _selected["slot_id"]:
-				v.selected_index = _selected["index"]
+			v.top_pressed.connect(_on_top)
 			v.strip_pressed.connect(_on_strip)
 			v.strip_peek.connect(_on_peek)
 			v.slot_pressed.connect(_on_slot)
@@ -220,32 +222,59 @@ func _refresh_visitors() -> void:
 
 
 # ---------- 摆货 ----------
-func _on_strip(slot_id: String, index: int) -> void:
-	if _selected["slot_id"] == slot_id and _selected["index"] == index:
-		_selected = {"slot_id": "", "index": -1}
-	else:
-		_selected = {"slot_id": slot_id, "index": index}
+func _hand() -> Slot:
+	return s.inventory.hand()
+
+
+## 点堆顶：从顶部拿一份到手上（03 §2.0）。不判定、不会塌，固定耗时，连续点就一份份往下拿。
+func _on_top(slot_id: String) -> void:
+	if slot_id == _hand().id:
+		return
+	if _hand().stack.is_full():
+		_say("手上拿不下了，先点某一格的空处放下。")
+		return
+	if api.take_top_to_hand(slot_id) != null:
+		_spend(ActionAPI.TAKE_TOP_SECONDS)
 	_refresh_slots()
 
 
-func _on_slot(slot_id: String) -> void:
-	if _selected["slot_id"] == "" or _selected["slot_id"] == slot_id:
+## 点侧面：从中间抽一份到手上。摊位上的要玩抽取小游戏；行囊是软包，直接掏出来。
+func _on_strip(slot_id: String, index: int) -> void:
+	if slot_id == _hand().id:
 		return
-	var from: String = _selected["slot_id"]
-	var idx: int = _selected["index"]
-	_with_pull(from, idx, func(input): _do_move(from, idx, slot_id, input))
+	if _hand().stack.is_full():
+		_say("手上拿不下了，先点某一格的空处放下。")
+		return
+	_with_pull(slot_id, index, func(input): _take_to_hand(slot_id, index, input))
 
 
-func _do_move(from: String, idx: int, slot_id: String, input: Dictionary) -> void:
-	var r := api.move_item(from, idx, slot_id, input)
-	if not r["ok"]:
-		_say("放不下了。")
-	elif r["collapsed"]:
+func _take_to_hand(slot_id: String, index: int, input: Dictionary) -> void:
+	var r := api.pull_item(slot_id, index, input)
+	if r["item"] == null:
+		return
+	api.place_on_top(r["item"], _hand().id)
+	if r["collapsed"]:
 		_say("[color=#e05a4f]抽的时候上面的货塌了，掉了一地！点地上那堆可以拾起来。[/color]")
 	elif r["displaced"]:
 		_say("上面那几份被带歪了。")
-	_selected = {"slot_id": "", "index": -1}
-	_spend(1.5)
+	if not input.get("resolved", false):
+		_spend(1.0)
+	_refresh_slots()
+
+
+## 点某一格的空处：把手上最上面那份放到这堆顶上（03 §4：只能放顶，不能插回原位）。
+func _on_slot(slot_id: String) -> void:
+	var h := _hand()
+	if slot_id == h.id:
+		return
+	if h.stack.height() == 0:
+		_say("手上没货。点堆顶拿一份，或点侧面从中间抽一份。")
+		return
+	var r := api.move_item(h.id, h.stack.height() - 1, slot_id)
+	if not r["ok"]:
+		_say("放不下了。")
+	else:
+		_spend(ActionAPI.TAKE_TOP_SECONDS)
 	_refresh_slots()
 
 

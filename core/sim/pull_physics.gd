@@ -5,16 +5,19 @@ extends RefCounted
 const OPTIMAL_ANGLE_DEG := 37.5
 const POINT_FACTOR := {"corner": 1.0, "edge": 0.7, "center": 0.4}
 
-# 系数（待实测调整）
+# 系数（待实测调整）。分工（03 §2.0）：k_w 和 MIN_FOLLOW 只决定抽出要花多久，
+# alpha / beta / gamma 决定风险。不要用"抽不动"来制造难度。
 static var k_w := 0.35
 static var a_angle := 1.0
 static var b_point := 1.2
 static var c_early := 1.5
 static var e_jerk := 0.8
 static var v_slow := 0.3
-static var alpha := 2.2
-static var beta := 0.45
-static var gamma := 4.0
+# gamma 大：手法好（d≈0.1）时上面压 6 份也只有约 4% 会塌；
+# alpha 大：手法糙（d≈1.5）时上面压 2 份就有一半会塌。
+static var alpha := 3.5
+static var beta := 0.4
+static var gamma := 6.0
 static var shift_scale := 0.25
 static var shift_threshold := 0.5
 
@@ -23,9 +26,18 @@ static func f_angle(theta_deg: float) -> float:
 	return 1.0 if theta_deg >= 30.0 and theta_deg <= 45.0 else lerpf(0.5, 1.0, 1.0 - minf(absf(theta_deg - OPTIMAL_ANGLE_DEG) / 52.5, 1.0))
 
 
+## 货最少能跟上手的比例：上面再重、手法再差，一直拖就一定能带出来，只是慢（03 §2.0）。
+const MIN_FOLLOW := 0.3
+
+
+## 货跟手的比例（0–1）：上方越重、角度越偏、抓的位置越差越慢，但不低于 MIN_FOLLOW。
+static func follow_ratio(weight_above: float, theta_deg: float, point: String) -> float:
+	return maxf(MIN_FOLLOW, 1.0 / (1.0 + k_w * weight_above) * f_angle(theta_deg) * float(POINT_FACTOR.get(point, 0.4)))
+
+
 ## 货物实际跟手速度（小游戏表现层用）。
 static func item_speed(v_hand: float, weight_above: float, theta_deg: float, point: String) -> float:
-	return v_hand / (1.0 + k_w * weight_above) * f_angle(theta_deg) * float(POINT_FACTOR.get(point, 0.4))
+	return v_hand * follow_ratio(weight_above, theta_deg, point)
 
 
 ## 玩家输入 → 偏差分。input: {angle_deg, point, early_speed, jerk}
@@ -93,3 +105,11 @@ static func input_from_drag(samples: Array, point: String, speed_unit: float = 6
 	for i in range(1, speeds.size()):
 		jerk = maxf(jerk, absf(speeds[i] - speeds[i - 1]) - 0.15)
 	return {"angle_deg": angle, "point": point, "early_speed": early_sum / early_n, "jerk": maxf(0.0, jerk)}
+
+
+## NPC 拿法（03 §5）：有耐心、谨慎的倾向从顶部一份份拿（慢、不塌）；马虎、没耐心、头一次来的直接从中间抽。
+## profile: {careless, patience, first_visit, skill}
+static func prefers_take_from_top(profile: Dictionary, rng: GameRng) -> bool:
+	var caution := 0.5 * float(profile.get("patience", 0.5)) + 0.5 * (1.0 - float(profile.get("careless", 0.3))) \
+		+ 0.2 * float(profile.get("skill", 0.0)) - (0.25 if profile.get("first_visit", false) else 0.0)
+	return rng.chance(clampf(caution * 1.2 - 0.1, 0.05, 0.95))
