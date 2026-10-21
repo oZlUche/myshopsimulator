@@ -59,9 +59,11 @@ func test_material_event_jumps_then_decays() -> void:
 
 func test_supplier_price_carries_pi_and_material_mult() -> void:
 	var econ := EconomyState.new().effective(1)
+	var mult: Dictionary = econ["material_cost_mult"]
+	for m in mult:
+		mult[m] = 1.0
 	var cat1 := LocalSupplier.refresh_catalog(econ, GameRng.new(42))
 	econ["price_level"] = 2.0
-	var mult: Dictionary = econ["material_cost_mult"]
 	for m in mult:
 		mult[m] = 1.5
 	var cat2 := LocalSupplier.refresh_catalog(econ, GameRng.new(42))
@@ -183,3 +185,40 @@ func test_wholesale_and_equipment_prices_carry_pi() -> void:
 	s.economy.price_level = 1.5
 	var def_id: String = DataDB.equipment().keys()[0]
 	assert_near(s.equipment_price(def_id), snappedf(float(DataDB.equipment()[def_id].get("price", 0.0)) * 1.5, 1.0), 0.0001, "设备价乘 π")
+
+
+func test_continuous_term_is_decentered() -> void:
+	var e := EconomyState.new()
+	for i in 3:
+		e.push_observation({"price_ratio": 0.5, "sales": 30, "traffic": 300})
+	assert_near(e.continuous_term(), 0.0, 0.0001, "不足 4 旬 C = 0")
+	var cheap := EconomyState.new()
+	for i in 30:
+		cheap.push_observation({"price_ratio": -0.25, "sales": 8, "traffic": 500})
+	assert_near(cheap.continuous_term(), 0.0, 0.0001, "一贯卖得便宜不会拉低景气")
+	var boom := EconomyState.new()
+	for i in 30:
+		boom.push_observation({"price_ratio": -0.1, "sales": 10, "traffic": 500})
+	for i in 6:
+		boom.push_observation({"price_ratio": 0.0, "sales": 13, "traffic": 650})
+	var c := boom.continuous_term()
+	assert_true(c > 0.02 and c <= EconomyState.C_MAX, "连续 6 旬三维都比自己均值好：C 为正，实际 %f" % c)
+	var crash := EconomyState.new()
+	for i in 30:
+		crash.push_observation({"price_ratio": 0.0, "sales": 10, "traffic": 500})
+	for i in 6:
+		crash.push_observation({"price_ratio": -5.0, "sales": 0, "traffic": 0})
+	assert_near(crash.continuous_term(), -EconomyState.C_MAX, 0.0001, "C 夹在 ±0.15")
+
+
+func test_season_pressure_uses_share_over_mean() -> void:
+	var e := EconomyState.new()
+	var winter: Dictionary = e.effective(28)["material_cost_mult"]
+	var share: Dictionary = e.effective(28)["material_pref"]
+	var n := float(share.size())
+	for m in winter:
+		var expect := clampf(1.0 + 0.1 * (float(share.get(m, 0.0)) * n - 1.0), 0.9, 1.08)
+		assert_near(float(winter[m]), expect, 0.0001, "S_mat = 1 + 0.1·(占比/平均占比 − 1)：%s" % m)
+	assert_near(float(winter["cashmere"]), 1.08, 0.0001, "当季主材顶到 +8%")
+	assert_true(float(winter["ice_silk"]) < 0.92, "反季材质接近 −10%")
+	assert_eq(e.policy["income_bracket_limits"], [30000.0, 100000.0])

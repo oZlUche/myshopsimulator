@@ -5,6 +5,15 @@ extends RefCounted
 ## 景气 G = Base + C 是主驱动，物价 π、运力 F、材质供给冲击 M_m 等宏观状态每旬由 period_step 更新（09 §1、§2）。
 
 const OBS_WINDOW := 36
+## 连续循环 C（09 §1.1 v0.2）：每维观测相对自己窗口均值的偏离，按 λ 衰减加权，× 增益后夹到 ±C_MAX；观测不足 C_MIN_OBS 旬时为 0
+const LAMBDA := 0.88
+const C_GAIN := 0.1
+const C_MAX := 0.15
+const C_MIN_OBS := 4
+## 各维权重与"显著单位"：成交价比动 0.10；成交量、客流相对自己均值动 30%
+const DEV_WEIGHT := {"price_ratio": 0.5, "sales": 0.3, "traffic": 0.2}
+const DEV_SCALE_PRICE := 0.10
+const DEV_SCALE_REL := 0.3
 ## 景气 G 的范围（09 §1.1）
 const G_MIN := 0.6
 const G_MAX := 1.6
@@ -29,9 +38,9 @@ const SHOCK_MAX := 1.5
 const SHOCK_EVENT_P := 0.02
 const SHOCK_EVENT_SIZE := 0.15
 const SHOCK_EVENT_LEN := 6
-## 进货价对景气的弹性 e_s；季节压力 S_mat = 1 + k·(占比 − 平均占比)（09 §3.1）
+## 进货价对景气的弹性 e_s；季节压力 S_mat = 1 + k·(占比 / 平均占比 − 1)（09 §3.1 v0.2）
 const SUPPLY_G := 0.25
-const SEASON_PRESSURE_K := 0.3
+const SEASON_PRESSURE_K := 0.1
 const SEASON_PRESSURE_MIN := 0.9
 const SEASON_PRESSURE_MAX := 1.08
 ## 消费能力 S = G^1.2（09 §3.3）
@@ -51,11 +60,8 @@ var base: Dictionary = {
 }
 ## 每年一条：{"consumption_level": Δ}
 var base_delta_history: Array = []
-## 最近旬的观测向量（最新在末尾）：{"price_ratio": 成交价/标价 - 1, "sales": 成交件数, "traffic": 过路客数}
+## 最近旬的观测向量（最新在末尾）：{"price_ratio": 成交价/(标价·π) - 1, "sales": 成交件数, "traffic": 过路客数}
 var observations: Array = []
-var lambda_: float = 0.88
-## C(t) 对消费水平的影响系数。
-var continuous_gain: float = 0.5
 
 ## ---- 09 宏观状态（老存档没有就按 1 起步）----
 ## 物价水平 π，第 1 旬为 1。所有表里的价格都是实际值，名义价 = 实际值 × π。
@@ -72,28 +78,45 @@ var material_events: Array = []
 var g_history: Array = []
 ## 租金目标指数 ρ_target（每旬算，续约时读）
 var rent_index_target: float = 1.0
-## 税制参数（预留，不实现，09 §3.6）。income_brackets 只有三档税率，分档线文档未定。
+## 税制参数（预留，只存不算，09 §3.6）。所得税超额累进：应税所得 0–30000 按 5%，30000–100000 按 10%，以上 20%（实际值）。
 var policy: Dictionary = {
 	"tax_sales_rate": 0.03,
 	"tax_threshold": 30000.0,
 	"income_exempt": 60000.0,
 	"income_brackets": [0.05, 0.10, 0.20],
+	"income_bracket_limits": [30000.0, 100000.0],
 }
 
 
-## 连续循环 C(t)：最近 ≤36 旬观测的指数衰减加权平均（只用 price_ratio 一维，后续可扩展）。
+## 连续循环 C(t)（09 §1.1 v0.2）：只看"最近比自己过去好还是差"。每维观测减去窗口内（≤36 旬）等权均值，
+## 除以显著单位，三维加权成 dev，再按 λ^i 衰减加权平均，× C_GAIN，夹到 ±C_MAX。玩家一贯卖得便宜或贵不会改变 G。
 func continuous_term() -> float:
-	if observations.is_empty():
+	var n: int = mini(observations.size(), OBS_WINDOW)
+	if n < C_MIN_OBS:
 		return 0.0
+	var recent := observations.slice(observations.size() - n)
+	var mean := {}
+	for k in DEV_WEIGHT:
+		var sum := 0.0
+		for obs in recent:
+			sum += float(obs.get(k, 0.0))
+		mean[k] = sum / n
 	var num := 0.0
 	var den := 0.0
-	var n: int = min(observations.size(), OBS_WINDOW)
 	for i in range(1, n + 1):
-		var w := pow(lambda_, i)
-		var obs: Dictionary = observations[observations.size() - i]
-		num += w * float(obs.get("price_ratio", 0.0))
+		var w := pow(LAMBDA, i)
+		num += w * _deviation(recent[n - i], mean)
 		den += w
-	return continuous_gain * num / den
+	return clampf(C_GAIN * num / den, -C_MAX, C_MAX)
+
+
+func _deviation(obs: Dictionary, mean: Dictionary) -> float:
+	var dev := 0.0
+	for k in DEV_WEIGHT:
+		var m := float(mean[k])
+		var scale := DEV_SCALE_PRICE if k == "price_ratio" else DEV_SCALE_REL * maxf(m, 1.0)
+		dev += float(DEV_WEIGHT[k]) * (float(obs.get(k, m)) - m) / scale
+	return dev
 
 
 ## 季节材质基线，换季前后各 1 旬线性插值。
@@ -139,7 +162,7 @@ func effective(period: int) -> Dictionary:
 	var cost_mult := {}
 	var mean_share := 1.0 / maxf(1.0, mat.size())
 	for m in DataDB.attributes()["materials"]:
-		var pressure := clampf(1.0 + SEASON_PRESSURE_K * (float(mat.get(m, 0.0)) - mean_share), SEASON_PRESSURE_MIN, SEASON_PRESSURE_MAX)
+		var pressure := clampf(1.0 + SEASON_PRESSURE_K * (float(mat.get(m, 0.0)) / mean_share - 1.0), SEASON_PRESSURE_MIN, SEASON_PRESSURE_MAX)
 		cost_mult[m] = material_mult(m, period) * (1.0 + SUPPLY_G * g) * pressure
 	return {
 		"consumption_level": G,
@@ -238,8 +261,6 @@ func to_dict() -> Dictionary:
 		"base": base.duplicate(true),
 		"base_delta_history": base_delta_history.duplicate(true),
 		"observations": observations.duplicate(true),
-		"lambda": lambda_,
-		"continuous_gain": continuous_gain,
 		"price_level": price_level,
 		"last_inflation": last_inflation,
 		"fuel_index_rw": fuel_index_rw,
@@ -258,8 +279,7 @@ static func from_dict(d: Dictionary) -> EconomyState:
 		e.base[k] = b[k]
 	e.base_delta_history = d.get("base_delta_history", [])
 	e.observations = d.get("observations", [])
-	e.lambda_ = float(d.get("lambda", 0.88))
-	e.continuous_gain = float(d.get("continuous_gain", 0.5))
+	# 老存档里的 lambda / continuous_gain 不再读，以常量为准（09 §1.1 v0.2）
 	e.price_level = float(d.get("price_level", 1.0))
 	e.last_inflation = float(d.get("last_inflation", INFL_BASE))
 	e.fuel_index_rw = float(d.get("fuel_index_rw", 1.0))
