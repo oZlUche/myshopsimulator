@@ -36,12 +36,52 @@ var _fit_pending := false
 var _returning: Array[CustomerProfile] = []
 
 
-func _init(state: GameState, stall_x: float) -> void:
+func _init(state: GameState, stall_x: float, returning: Variant = null) -> void:
 	s = state
 	api = ActionAPI.new(state)
 	x = stall_x
-	s.stall["x"] = stall_x
-	_returning = s.customers.roll_returning(s.rng)
+	if not is_nan(stall_x):
+		s.stall["x"] = stall_x
+	if returning == null:
+		_returning = s.customers.roll_returning(s.rng)
+	else:
+		_returning.assign(returning)
+
+
+## 这一旬还没回来的常客（店面和仓库来回跑时要接着用，别让同一个常客回来两次）。
+func returning_left() -> Array[CustomerProfile]:
+	return _returning
+
+
+# ---------- 场地（摊位 / 店面各自覆盖） ----------
+## 客人看得到、挑得到的货格。
+func display_slots() -> Array[Slot]:
+	return s.inventory.slots_of_type("StallTable")
+
+
+func is_display(sl: Slot) -> bool:
+	return sl.type == "StallTable"
+
+
+## 找货时还会翻的地方（自动模拟用）：摊位上找不到就去行囊里。
+func storage_slots() -> Array[Slot]:
+	return s.inventory.slots_of_type("Bag")
+
+
+## 提示里怎么叫这一格：「摊位 2」。
+func slot_title(sl: Slot) -> String:
+	return "摊位 %d" % (display_slots().find(sl) + 1)
+
+
+## 每秒新来多少过路客。
+func spawn_rate(t: float) -> float:
+	var width := float(area_radius() * 2 + 1)
+	return s.street.density(x, t) * width * TRAFFIC_SCALE
+
+
+## 场地对逗留的修正：吆喝 × 同街竞争。
+func venue_stay_mult() -> float:
+	return float(SkillSystem.shout_mods(s.player)["stay_mult"]) * (1.0 - s.street.competition(x, area_radius()))
 
 
 static func can_open_at(state: GameState, stall_x: float) -> bool:
@@ -61,9 +101,7 @@ func tick(dt: float) -> void:
 	if is_over():
 		return
 	s.clock.time_of_period = minf(1.0, s.clock.time_of_period + dt / PERIOD_SECONDS)
-	var t := s.clock.time_of_period
-	var width := float(area_radius() * 2 + 1)
-	_spawn_acc += s.street.density(x, t) * width * TRAFFIC_SCALE * dt
+	_spawn_acc += spawn_rate(s.clock.time_of_period) * dt
 	_fit_acc += dt
 	if _fit_acc >= fit_interval():
 		_fit_acc = 0.0
@@ -119,7 +157,7 @@ func _wait_ran_out(v: Dictionary) -> void:
 		if w["done"]:
 			continue
 		var loc := locate(w["item_id"])
-		var on_table: bool = not loc.is_empty() and s.inventory.slots[loc["slot_id"]].type == "StallTable"
+		var on_table: bool = not loc.is_empty() and is_display(s.inventory.slots[loc["slot_id"]])
 		if on_table and s.rng.chance(c.self_serve):
 			var r := api.npc_fetch(loc["slot_id"], loc["index"], c.to_actor_profile())
 			if r["item"] != null:
@@ -167,7 +205,7 @@ func fit_interval() -> float:
 ## 人本身照常从原型里抽（generate 已经抽过）。摊上没货返回 false。
 func _fit_to_stall(c: CustomerProfile) -> bool:
 	var pool: Array = []
-	for sl in s.inventory.slots_of_type("StallTable"):
+	for sl in display_slots():
 		pool.append_array(sl.stack.items)
 	if pool.is_empty():
 		return false
@@ -181,7 +219,7 @@ func _fit_to_stall(c: CustomerProfile) -> bool:
 ## 摊位上摆着几份货（不算地上塌的）。
 func table_goods() -> int:
 	var n := 0
-	for sl in s.inventory.slots_of_type("StallTable"):
+	for sl in display_slots():
 		n += sl.stack.height()
 	return n
 
@@ -211,7 +249,7 @@ func _consider(c: CustomerProfile, is_returning: bool) -> void:
 	var tol: float = v["ctx"].tolerance(c, float(mods["tol_add"]))
 	var best_d := INF
 	var best_slot: Slot = null
-	for sl in s.inventory.slots_of_type("StallTable"):
+	for sl in display_slots():
 		for i in sl.stack.height():
 			var seen := _see(v, sl, i)
 			var d := AttrDistance.to_expectation(seen["sku"], c.expectations[0])
@@ -219,9 +257,8 @@ func _consider(c: CustomerProfile, is_returning: bool) -> void:
 				best_d = d
 				best_slot = sl
 	var match_f := clampf(1.0 - best_d / tol, 0.3, 1.0)
-	var shout := SkillSystem.shout_mods(s.player)
-	var p := BASE_STAY_P * m_crowd(c.crowd_pref, heat()) * float(shout["stay_mult"]) * match_f \
-		* best_slot.display_score * (1.0 - 0.3 * best_slot.stack.disorder) * (1.0 - s.street.competition(x, area_radius()))
+	var p := BASE_STAY_P * m_crowd(c.crowd_pref, heat()) * venue_stay_mult() * match_f \
+		* best_slot.display_score * (1.0 - 0.3 * best_slot.stack.disorder)
 	if is_returning:
 		p = maxf(p, 0.7)
 	if not s.rng.chance(p):
@@ -272,7 +309,7 @@ func _pick(v: Dictionary, exclude: Array = []) -> Dictionary:
 	var taken := exclude + _promised_items()
 	for ei in ctx.remaining_expectations(c):
 		var best := {}
-		for sl in s.inventory.slots_of_type("StallTable"):
+		for sl in display_slots():
 			for i in sl.stack.height():
 				var item: ScarfItem = sl.stack.items[i]
 				if taken.has(item.id):
@@ -291,7 +328,7 @@ func _pick(v: Dictionary, exclude: Array = []) -> Dictionary:
 
 ## 客人看中的那份货现在在哪：{slot_id, index}；已不在摊位上（也不在你手上）则为空。
 func locate(item_id: String) -> Dictionary:
-	for sl in s.inventory.slots_of_type("StallTable") + s.inventory.slots_of_type("Hand"):
+	for sl in display_slots() + s.inventory.slots_of_type("Hand"):
 		var idx := sl.stack.index_of(item_id)
 		if idx >= 0:
 			return {"slot_id": sl.id, "index": idx}
@@ -311,7 +348,7 @@ func _promised_items() -> Array:
 
 ## 某款货现在在哪（先摊位后行囊，靠上的优先）：{slot_id, index}。自动模拟找货用。
 func find_sku(sku_id: String) -> Dictionary:
-	for sl in s.inventory.slots_of_type("StallTable") + s.inventory.slots_of_type("Bag"):
+	for sl in display_slots() + storage_slots():
 		for i in range(sl.stack.height() - 1, -1, -1):
 			if sl.stack.items[i].sku_id == sku_id:
 				return {"slot_id": sl.id, "index": i}
@@ -408,7 +445,6 @@ func wait_for_item(c: CustomerProfile) -> float:
 func _describe_want(want: Array) -> String:
 	var parts: Array = []
 	var a := DataDB.attributes()
-	var tables := s.inventory.slots_of_type("StallTable")
 	for w in want:
 		var color: String = a["colors"][DataDB.sku(w["sku_id"])["color"]]["name"]
 		var loc := locate(w["item_id"])
@@ -419,7 +455,7 @@ func _describe_want(want: Array) -> String:
 		if sl.type == "Hand":
 			parts.append("你手上那条%s边的" % color)
 		else:
-			parts.append("摊位 %d 从上往下第 %d 份，露出%s边的那条" % [tables.find(sl) + 1, sl.stack.count_above(loc["index"]) + 1, color])
+			parts.append("%s 从上往下第 %d 份，露出%s边的那条" % [slot_title(sl), sl.stack.count_above(loc["index"]) + 1, color])
 	return "、".join(parts)
 
 
@@ -491,14 +527,13 @@ func deliver(v: Dictionary, hand: Slot) -> Dictionary:
 ## 摊位（含地上）、手上、行囊里一共还有几份货。
 func goods_left() -> int:
 	var n := 0
-	for t in ["StallTable", "Hand", "Bag"]:
-		for sl in s.inventory.slots_of_type(t):
-			n += sl.stack.height() + sl.stack.collapsed_pile.size()
+	for sl in display_slots() + storage_slots() + s.inventory.slots_of_type("Hand"):
+		n += sl.stack.height() + sl.stack.collapsed_pile.size()
 	return n
 
 
 func table_empty() -> bool:
-	for sl in s.inventory.slots_of_type("StallTable"):
+	for sl in display_slots():
 		if sl.stack.height() + sl.stack.collapsed_pile.size() > 0:
 			return false
 	return true

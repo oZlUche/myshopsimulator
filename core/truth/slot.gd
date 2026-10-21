@@ -2,7 +2,7 @@ class_name Slot
 extends RefCounted
 ## 持有一个货堆的位置（01 §4.1）。
 
-const TYPES := ["WarehouseShelf", "ShopBackroom", "ShopDisplay", "CarTrunk", "StallTable", "Bag", "Hand"]
+const TYPES := ["WarehouseShelf", "ShopBackroom", "ShopDisplay", "CarTrunk", "StallTable", "Bag", "Hand", "Floor", "Cart"]
 
 var id: String
 var type: String
@@ -14,6 +14,27 @@ var access_cost: float = 1.0
 ## 提供该槽位的设备实例 ID（无则为空）。
 var equipment_id: String = ""
 var stack := ItemStack.new()
+## 整箱、整包（07 §1）：下标 0 在最下面，只能动最上面那个。一个槽位里散货和整包不混放。
+var packages: Array[Package] = []
+## 能放多少整箱整包（按 Package.UNITS 计，箱 3、包 1）；0 = 不放整包
+var pkg_capacity: int = 0
+
+
+func package_units() -> int:
+	var n := 0
+	for p in packages:
+		n += p.units()
+	return n
+
+
+func top_package() -> Package:
+	return null if packages.is_empty() else packages[-1]
+
+
+## 这个包 / 箱能不能放上来：容量够，而且这里没有散货。
+func can_hold(p: Package) -> bool:
+	return pkg_capacity > 0 and stack.height() == 0 and stack.collapsed_pile.is_empty() \
+		and package_units() + p.units() <= pkg_capacity
 
 
 func to_dict() -> Dictionary:
@@ -23,6 +44,8 @@ func to_dict() -> Dictionary:
 		"display_score": display_score, "access_cost": access_cost,
 		"equipment_id": equipment_id,
 		"stack": stack.to_dict(),
+		"packages": packages.map(func(p): return p.to_dict()),
+		"pkg_capacity": pkg_capacity,
 	}
 
 
@@ -37,4 +60,7 @@ static func from_dict(d: Dictionary) -> Slot:
 	s.access_cost = float(d.get("access_cost", 1.0))
 	s.equipment_id = str(d.get("equipment_id", ""))
 	s.stack = ItemStack.from_dict(d.get("stack", {}))
+	for x in d.get("packages", []):
+		s.packages.append(Package.from_dict(x))
+	s.pkg_capacity = int(d.get("pkg_capacity", 0))
 	return s

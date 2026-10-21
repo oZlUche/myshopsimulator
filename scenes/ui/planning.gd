@@ -57,7 +57,11 @@ func _ready() -> void:
 	bar.add_child(_msg)
 	bar.add_child(UIKit.button("保存", _save))
 	bar.add_child(UIKit.button("回主菜单", func(): Game.goto("menu")))
-	bar.add_child(UIKit.button("出门找摊位 →", _go_street, 20))
+	if s.player.phase == "shop":
+		bar.add_child(UIKit.button("去仓库 →", _go_room.bind("warehouse"), 20))
+		bar.add_child(UIKit.button("去店里 →", _go_room.bind("shop"), 20))
+	else:
+		bar.add_child(UIKit.button("出门找摊位 →", _go_street, 20))
 	_refresh()
 
 
@@ -89,6 +93,9 @@ func _refresh() -> void:
 # ---------- 进货 ----------
 func _refresh_buy() -> void:
 	UIKit.clear(_buy_box)
+	if s.player.phase == "shop":
+		_buy_box.add_child(UIKit.label("开店以后按箱进货（托运部、批发市场）还没做。这一版先用仓库卸货区里的那批货：一箱 10 包，一包 10 条，有单色包也有混色包。", 14, UIKit.MUTED))
+		return
 	_buy_box.add_child(UIKit.label("本地围巾店今天的货。只看得到外观，看不出什么会流行。买的货直接装进行囊。", 14, UIKit.MUTED))
 	for e in s.supplier_catalog:
 		var row := UIKit.hbox(10)
@@ -132,6 +139,9 @@ func _refresh_bag() -> void:
 		v.strip_peek.connect(func(sid, i): api.peek_item(sid, i); _refresh_bag())
 		_bag_box.add_child(v)
 	UIKit.clear(_equip_box)
+	if s.player.phase == "shop":
+		_equip_box.add_child(UIKit.label("店面、仓库的设备到店里点「摆设备」、到仓库点「摆货架」，在格子上买、挪、卖。", 14, UIKit.MUTED))
+		return
 	for def_id in DataDB.equipment():
 		var d: Dictionary = DataDB.equipment()[def_id]
 		if d.get("phase") != "stall" or float(d.get("price", 0)) <= 0.0:
@@ -250,6 +260,13 @@ func _refresh_notes() -> void:
 func _save() -> void:
 	var r := Game.autosave()
 	_say("已保存。" if r["ok"] else "保存失败：" + r["error"], r["ok"])
+
+
+## 开店阶段：去店里或去仓库（07）。
+func _go_room(scene: String) -> void:
+	Game.autosave()
+	Game.arrive_from = "planning"
+	Game.goto(scene)
 
 
 func _go_street() -> void:
