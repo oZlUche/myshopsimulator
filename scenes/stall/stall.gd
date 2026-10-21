@@ -449,6 +449,7 @@ func _refresh_haggle() -> void:
 	for l in hint_lines:
 		_haggle_box.add_child(UIKit.label(l, 13, UIKit.MUTED))
 	_haggle_box.add_child(UIKit.label("他指着摊上白框那份。标价：%d 元" % roundi(_haggle.asking_price), 14))
+	_haggle_box.add_child(UIKit.label(_cost_line(), 14, UIKit.MUTED))
 	_haggle_box.add_child(UIKit.label("「%s」" % _haggle.last_line, 18))
 	if _haggle.result != "ongoing":
 		_haggle_box.add_child(UIKit.button("好", _end_haggle))
@@ -487,6 +488,22 @@ func _refresh_haggle() -> void:
 		brow.add_child(UIKit.button("「%s」再加一条，两条一共这个价" % HaggleState.BUNDLE_LINE,
 			func(): _haggle.offer_bundle(_bundle_spin.value, s.rng); _after_haggle_step(), 14))
 		_haggle_box.add_child(brow)
+
+
+## 成本价一直显示（01 §6.4）；能「一起买」时两条各自的成本和合计都列出来。
+func _cost_line() -> String:
+	var a := session.cost_of(_haggle_visitor.get("item_id", ""), _haggle.sku_id)
+	if _haggle.bundle_extra.is_empty():
+		return "成本：%s 元" % _cost_text(a)
+	var b := session.cost_of(_haggle.bundle_extra["item_id"], _haggle.bundle_extra["sku_id"])
+	var total := {"cost": float(a["cost"]) + float(b["cost"]), "estimated": a["estimated"] or b["estimated"]}
+	return "成本：这条 %s + 另一条 %s = %s 元" % [_cost_text(a), _cost_text(b), _cost_text(total)]
+
+
+func _cost_text(c: Dictionary) -> String:
+	var v := float(c["cost"])
+	var n := str(roundi(v)) if is_equal_approx(v, roundf(v)) else "%.1f" % v
+	return ("约 " if c["estimated"] else "") + n
 
 
 func _after_haggle_step() -> void:
