@@ -1,0 +1,39 @@
+{
+	"_comment": "客人性格（06 §1.4 方案 C）：五维潜在向量 → 派生行为参数。生成客人时从原型里按权重抽一个、每维加噪声，再按 derived 一次性算出行为参数并加独立噪声；之后代码只读派生参数。改这里只影响新生成的客人，常客不变。terms 里每项是 [系数, 维度或已算出的参数, ...]，多个名字相乘；名字前加 ~ 表示取 1 − 值。",
+	"dims": ["sociable", "shrewd", "composed", "fastidious", "agreeable"],
+	"dim_noise": 0.15,
+	"archetypes": {
+		"shrewd_auntie": {"name": "精明大妈", "weight": 0.22, "vec": [0.7, 0.85, 0.5, 0.5, 0.4]},
+		"shy_student": {"name": "腼腆学生", "weight": 0.18, "vec": [0.2, 0.3, 0.4, 0.35, 0.65]},
+		"easygoing_guy": {"name": "爽快大哥", "weight": 0.2, "vec": [0.8, 0.25, 0.45, 0.2, 0.75]},
+		"picky_officeworker": {"name": "挑剔白领", "weight": 0.2, "vec": [0.4, 0.55, 0.3, 0.85, 0.35]},
+		"leisurely_elder": {"name": "闲逛老人", "weight": 0.2, "vec": [0.45, 0.4, 0.85, 0.45, 0.7]}
+	},
+	"derived": [
+		{"name": "patience_n", "const": 4.0, "terms": [[2.0, "composed"], [1.0, "agreeable"], [-1.0, "shrewd"]], "noise": 0.5, "clamp": [3, 9], "round": true},
+		{"name": "crowd_pref", "const": -1.0, "terms": [[2.0, "sociable"]], "noise": 0.15, "clamp": [-1, 1]},
+		{"name": "initiative", "const": 0.0, "terms": [[0.7, "sociable"], [0.3, "shrewd"]], "noise": 0.1, "clamp": [0, 1]},
+		{"name": "candor", "const": 1.0, "terms": [[-1.0, "shrewd"]], "noise": 0.1, "clamp": [0, 1]},
+		{"name": "tolerance", "const": 0.55, "terms": [[-0.35, "fastidious"]], "noise": 0.05, "clamp": [0.1, 0.6]},
+		{"name": "n_expect", "const": 1.0, "terms": [[1.5, "fastidious"], [0.5, "~composed"]], "noise": 0.3, "clamp": [1, 3], "round": true},
+		{"name": "browse_speed", "const": 0.3, "terms": [[0.4, "~composed"], [0.3, "~fastidious"]], "noise": 0.05, "clamp": [0, 1]},
+		{"name": "temper", "const": 0.0, "terms": [[1.0, "sociable", "~agreeable"]], "noise": 0.05, "clamp": [0, 1]},
+		{"name": "self_serve", "const": 0.15, "terms": [[0.6, "initiative"], [-0.2, "agreeable"]], "noise": 0.05, "clamp": [0, 1]},
+		{"name": "hesitation", "const": 0.0, "terms": [[0.6, "~composed"], [0.2, "fastidious"]], "noise": 0.08, "clamp": [0, 1]},
+		{"name": "intent", "const": 0.35, "terms": [[0.3, "sociable"], [0.15, "~shrewd"]], "noise": 0.12, "clamp": [0.05, 1]},
+		{"name": "kindness", "const": 0.0, "terms": [[1.0, "agreeable"]], "noise": 0.05, "clamp": [0, 1]},
+		{"name": "loyalty_base", "const": 0.1, "terms": [[0.45, "agreeable"]], "noise": 0.12, "clamp": [0, 1]}
+	],
+	"_comment_strategy": "砍价风格（01 §4.3 的 haggle_strategy）：精算高 → 直接要折扣；外向高 → 装作要走；其余拉锯。",
+	"haggle_strategy": {"direct_discount_shrewd": 0.6, "fake_leave_sociable": 0.55},
+	"_comment_words": "客人观察 Lv4 显示的性格词：[高, 低]。偏离 0.5 超过 min_dev 的维度按偏离度取前 max_words 个。",
+	"words": {
+		"sociable": ["爱热闹", "喜欢清净"],
+		"shrewd": ["精打细算", "好说话"],
+		"composed": ["从容", "急性子"],
+		"fastidious": ["挑剔", "不挑"],
+		"agreeable": ["随和", "冷淡"]
+	},
+	"min_dev": 0.15,
+	"max_words": 3
+}

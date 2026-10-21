@@ -99,14 +99,16 @@ static func shout_mods(player: PlayerState) -> Dictionary:
 	}
 
 
-## 口才（02 §2.6）→ HaggleState 修正。
+## 口才（02 §2.6 → 06 §3.4）→ HaggleState 修正。
+## Lv1/Lv3 提高策略成功率（随等级 +0.08）；Lv2 策略失败少扣 P；Lv4 挑选容差 +0.1；Lv5 每第三次出手不扣耐心；Lv6 回购。
 static func haggle_mods(player: PlayerState) -> Dictionary:
 	var lv := player.skill_level("eloquence")
 	var shout := shout_mods(player)
 	return {
-		"accept_tolerance": (0.04 if lv >= 1 else 0.0) + (0.04 if lv >= 3 else 0.0),
-		"patience_loss_mult": (0.75 if lv >= 2 else 1.0) * (0.8 if lv >= 5 else 1.0),
-		"match_tolerance": 0.15 if lv >= 4 else 0.0,
+		"eloquence": lv,
+		"fail_penalty": 0.03 if lv >= 2 else 0.05,
+		"tol_add": 0.1 if lv >= 4 else 0.0,
+		"free_every": 3 if lv >= 5 else 0,
 		"reserve_mult": shout["reserve_mult"],
 		"loyalty_bonus": 0.05 if lv >= 6 else 0.0,
 	}

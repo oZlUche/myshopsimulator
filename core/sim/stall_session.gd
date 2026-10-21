@@ -1,11 +1,11 @@
 class_name StallSession
 extends RefCounted
-## 摆摊营业（01 §6.9）：过路客沿人流穿过摊位周遭 N×M 区域时掷逗留判定，逗留者进入客人状态机。
+## 摆摊营业（01 §6.9、06 §3）：过路客沿人流穿过摊位周遭 N×M 区域时掷逗留判定，逗留者进入客人状态机。
 ## 表现层和无界面模拟都用它推进；议价交互由调用方处理（headless 用 AutoSeller）。
 
 ## 一旬的营业时长（秒，实时，1x 速度）。目标 12–18 分钟，待实测（01 §3.1）。
 const PERIOD_SECONDS := 900.0
-const BASE_STAY_P := 0.35
+const BASE_STAY_P := 0.6
 ## 人流密度 → 每秒过路客数的换算
 const TRAFFIC_SCALE := 0.12
 ## 合拍客人保底计时器（06 §3.1）：间隔 T = T0 / (1 + k·摊上货物份数)
@@ -16,14 +16,18 @@ signal visitor_arrived(visitor: Dictionary)
 signal visitor_left(visitor: Dictionary)
 ## 每个走过周遭范围的过路客（表现层画行人用）。stayed 表示是否被吸引停下。
 signal passerby(stayed: bool)
+## 等货等到头，客人自己上手拿了（06 §3.6）。r 为 ActionAPI.npc_fetch 的结果。
+signal self_served(visitor: Dictionary, r: Dictionary)
 
 var s: GameState
 var api: ActionAPI
 var x: float
-## 当前逗留的客人 [{customer, ctx, item_id, state, wait, want, hint}]
-## state: browsing 在看 → asking 在问价（等玩家理会）→ haggling 议价中 → waiting_item 谈成了、等你拿货给他
-##        → 交货后继续逛（回到 browsing）或离开（left）
-## ctx: VisitContext；want: 谈成待交的货 [{item_id, sku_id, price, reserve, done}]；hint: 他指货时你看到的位置描述
+## 当前逗留的客人 [{customer, ctx, state, wait, item_id, pick, initiative, p_adj, p_final, want, hint, seen}]
+## state: browsing 在挑（挑完找到 → asking，找不到 → 走）→ asking 在问价（等玩家理会）→ haggling 议价中
+##        → waiting_item 谈成了、等你拿货给他 → 交货后再逛（回到 browsing）或离开（left）
+## ctx: VisitContext；pick: 挑中的货 {item_id, perceived_sku, exp_index, d, tol}；p_adj: 别人闹场等带来的 P 增减；
+## want: 谈成待交的货 [{item_id, sku_id, price, reserve, exp_index, done}]；hint: 他指货时你看到的位置描述；
+## seen: 他对每份货的观感缓存 {item_id: {noticed, sku}}（看走眼一次就一直那么以为）
 var visitors: Array = []
 var _spawn_acc := 0.0
 var _fit_acc := 0.0
@@ -74,22 +78,70 @@ func tick(dt: float) -> void:
 		if v["state"] == "haggling":
 			continue
 		v["wait"] = float(v["wait"]) - dt
-		if v["wait"] <= 0.0:
-			if v["state"] == "asking":
+		if v["wait"] > 0.0:
+			continue
+		match v["state"]:
+			"browsing":
+				_finish_browsing(v)
+			"asking":
 				s.period_stats["ignored"] = int(s.period_stats.get("ignored", 0)) + 1
-			elif v["state"] == "waiting_item":
-				_lose_deal(v)
-			_leave(v)
-		elif v["state"] == "browsing" and s.rng.chance(v["customer"].intent * (1.0 - 0.5 * v["customer"].hesitation) * 0.04 * dt):
-			# 犹豫一会儿后开口问价
-			v["state"] = "asking"
-			v["wait"] = 15.0 + 45.0 * v["customer"].patience
+				_leave(v)
+			"waiting_item":
+				_wait_ran_out(v)
+			_:
+				_leave(v)
 
 
-## 谈成了却没拿到货就走了：计入流失，常客回购率下降。
-func _lose_deal(v: Dictionary) -> void:
+## 挑完了：有在容差内的货就开口，没有就"看了看走了"（06 §3.2）。
+func _finish_browsing(v: Dictionary) -> void:
+	var pick := _pick(v)
+	if pick.is_empty():
+		s.period_stats["no_match"] = int(s.period_stats.get("no_match", 0)) + 1
+		_leave(v)
+		return
+	var c: CustomerProfile = v["customer"]
+	v["pick"] = pick
+	v["item_id"] = pick["item_id"]
+	v["state"] = "asking"
+	v["wait"] = 15.0 + 45.0 * c.patience
+	# 主动开价还是问"多少钱"（06 §3.3），吆喝 Lv3 让人更愿意开口
+	var shout := SkillSystem.shout_mods(s.player)
+	v["initiative"] = s.rng.chance(clampf(c.initiative + float(shout["intent_add"]), 0.0, 1.0))
+
+
+## 等货等到头（06 §3.6）：货还摆在摊上 → 按 self_serve 自己上手拿、按谈好的价付钱；
+## 否则转身走（谈成没拿到货）。货在你手上或已经没了，好感和回购率再扣。
+func _wait_ran_out(v: Dictionary) -> void:
+	var c: CustomerProfile = v["customer"]
+	var ctx: VisitContext = v["ctx"]
+	var missing := false
+	for w in v["want"]:
+		if w["done"]:
+			continue
+		var loc := locate(w["item_id"])
+		var on_table: bool = not loc.is_empty() and s.inventory.slots[loc["slot_id"]].type == "StallTable"
+		if on_table and s.rng.chance(c.self_serve):
+			var r := api.npc_fetch(loc["slot_id"], loc["index"], c.to_actor_profile())
+			if r["item"] != null:
+				api.sell_item(r["item"], float(w["price"]), c, float(w["reserve"]))
+				w["done"] = true
+				ctx.basket_count += 1
+				ctx.spent += float(w["price"])
+				self_served.emit(v, r)
+				continue
+		missing = true
+		if not on_table:
+			ctx.add_rapport(-0.3)
+			s.customers.penalize(c, 0.1)
+	if missing:
+		s.period_stats["lost_after_deal"] = int(s.period_stats.get("lost_after_deal", 0)) + 1
+	_leave(v)
+
+
+## 谈成了却没拿到货就走了（递错两次 / 收摊）：计入流失，常客回购率下降。
+func _lose_deal(v: Dictionary, penalty: float = 0.1) -> void:
 	s.period_stats["lost_after_deal"] = int(s.period_stats.get("lost_after_deal", 0)) + 1
-	s.customers.penalize(v["customer"], 0.1)
+	s.customers.penalize(v["customer"], penalty)
 
 
 func _leave(v: Dictionary) -> void:
@@ -111,8 +163,8 @@ func fit_interval() -> float:
 	return FIT_T0 / (1.0 + FIT_K * table_goods())
 
 
-## 把这位过路客的喜好对准摊上实际摆着的某一份货（06 §3.1）。摊上没货返回 false。
-## TODO(06 §1)：性格表示拍板后，再把热闹偏好 c 设成让 m_crowd(c, H) ≥ 0.9 的值、从原型里抽人。
+## 合拍客人（06 §3.1）：第一条预期值对准摊上实际摆着的某一份货，热闹偏好调到眼下最受用的一头。
+## 人本身照常从原型里抽（generate 已经抽过）。摊上没货返回 false。
 func _fit_to_stall(c: CustomerProfile) -> bool:
 	var pool: Array = []
 	for sl in s.inventory.slots_of_type("StallTable"):
@@ -121,6 +173,8 @@ func _fit_to_stall(c: CustomerProfile) -> bool:
 		return false
 	var sku := DataDB.sku(s.rng.pick(pool).sku_id)
 	c.preference = {"color": sku["color"], "pattern": sku["pattern"], "material": sku["material"]}
+	# m_crowd = 0.55 + c·(H − 0.55)：H 高就让他爱热闹，H 低就让他爱清净，取到 max(H, 1.1 − H)
+	c.crowd_pref = 1.0 if heat() >= 0.55 else -1.0
 	return true
 
 
@@ -138,21 +192,36 @@ func heat() -> float:
 
 
 ## 热闹偏好 c ∈ [−1, 1] 对停留的倍率：c = 1 最爱热闹（= H），c = −1 最爱清净（= 1.1 − H），c = 0 无所谓（0.55）。
-## TODO(06 §1)：c 由性格派生，拍板后接进 _consider 的 stay_p。
 static func m_crowd(c: float, h: float) -> float:
 	return (1.0 + c) * 0.5 * h + (1.0 - c) * 0.5 * (1.1 - h)
 
 
-## 逗留判定：stay_p = base × 吆喝修正 × 偏好匹配度 × 展示度（× 竞争、乱堆修正）。
+## 逗留判定（06 §3.1）：stay_p = base × m_crowd(c, H) × 吆喝 × 展示度 × 偏好匹配（× 乱堆、竞争修正）。
+## 偏好匹配 = 第一条想要的与摊上最接近那份（按他看到的）的 1 − d/tol，夹到 0.3..1。
 func _consider(c: CustomerProfile, is_returning: bool) -> void:
-	var best := _best_item_for(c)
-	if best.is_empty():
+	if table_goods() == 0:
 		passerby.emit(false)
 		return
+	var v := {
+		"customer": c, "ctx": VisitContext.create(c, s.rng), "state": "browsing", "wait": 0.0,
+		"item_id": "", "pick": {}, "initiative": false, "p_adj": 0.0, "p_final": 0.0,
+		"want": [], "hint": "", "seen": {},
+	}
+	var mods := SkillSystem.haggle_mods(s.player)
+	var tol: float = v["ctx"].tolerance(c, float(mods["tol_add"]))
+	var best_d := INF
+	var best_slot: Slot = null
+	for sl in s.inventory.slots_of_type("StallTable"):
+		for i in sl.stack.height():
+			var seen := _see(v, sl, i)
+			var d := AttrDistance.to_expectation(seen["sku"], c.expectations[0])
+			if d < best_d:
+				best_d = d
+				best_slot = sl
+	var match_f := clampf(1.0 - best_d / tol, 0.3, 1.0)
 	var shout := SkillSystem.shout_mods(s.player)
-	var sl: Slot = s.inventory.slots[best["slot_id"]]
-	var p := BASE_STAY_P * float(shout["stay_mult"]) * (0.3 + 0.7 * float(best["match"])) \
-		* sl.display_score * (1.0 - 0.3 * sl.stack.disorder) * (1.0 - s.street.competition(x, area_radius()))
+	var p := BASE_STAY_P * m_crowd(c.crowd_pref, heat()) * float(shout["stay_mult"]) * match_f \
+		* best_slot.display_score * (1.0 - 0.3 * best_slot.stack.disorder) * (1.0 - s.street.competition(x, area_radius()))
 	if is_returning:
 		p = maxf(p, 0.7)
 	if not s.rng.chance(p):
@@ -160,30 +229,64 @@ func _consider(c: CustomerProfile, is_returning: bool) -> void:
 		return
 	passerby.emit(true)
 	s.period_stats["stayed"] = int(s.period_stats["stayed"]) + 1
-	var wants_to_ask := s.rng.chance(clampf(c.intent + float(shout["intent_add"]), 0.0, 1.0))
-	var v := {
-		"customer": c, "ctx": VisitContext.create(c), "item_id": best["item_id"],
-		"state": "asking" if wants_to_ask else "browsing",
-		"wait": 20.0 + 60.0 * c.patience, "want": [], "hint": "",
-	}
+	v["wait"] = browse_time(c)
 	visitors.append(v)
 	visitor_arrived.emit(v)
 
 
-## 客人在摊位上最想要的那份货。客人只看得到边缘条，按偏好匹配挑。exclude 里的货不挑。
-func _best_item_for(c: CustomerProfile, exclude: Array = []) -> Dictionary:
-	var best := {}
+## 挑货要花的时间：每看一份 0.4 + 1.6·(1 − 挑选速度) 秒（06 §3.2），最多看 12 份。
+func browse_time(c: CustomerProfile) -> float:
+	return mini(table_goods(), 12) * (0.4 + 1.6 * (1.0 - c.browse_speed))
+
+
+## 他眼里的这份货：注没注意到（越往下越容易被忽略），以及看成了什么（图案看边缘、材质靠猜，可能看走眼）。
+## 第一次看到时掷一次并记住。
+func _see(v: Dictionary, sl: Slot, i: int) -> Dictionary:
+	var item: ScarfItem = sl.stack.items[i]
+	var cache: Dictionary = v["seen"]
+	if not cache.has(item.id):
+		var sku := DataDB.sku(item.sku_id)
+		cache[item.id] = {
+			"noticed": s.rng.chance(1.0 - 0.1 * sl.stack.count_above(i)),
+			"sku": "scarf_%s_%s_%s" % [_guess(AttrDistance.pattern_confusion(sku["pattern"]), sku["pattern"]),
+				sku["color"], _guess(AttrDistance.material_confusion(sku["material"]), sku["material"])],
+		}
+	return cache[item.id]
+
+
+func _guess(conf: Dictionary, truth: String) -> String:
+	var roll := s.rng.randf()
+	for q in conf:
+		roll -= float(conf[q])
+		if roll < 0.0:
+			return q
+	return truth
+
+
+## 按预期值的优先级扫一遍摊上注意到的货，挑差值最小且在容差内的那份（06 §3.2）。
+## 返回 {item_id, slot_id, index, perceived_sku, exp_index, d, tol}；一份都没有返回空。
+func _pick(v: Dictionary, exclude: Array = []) -> Dictionary:
+	var c: CustomerProfile = v["customer"]
+	var ctx: VisitContext = v["ctx"]
+	var tol := ctx.tolerance(c, float(SkillSystem.haggle_mods(s.player)["tol_add"]))
 	var taken := exclude + _promised_items()
-	for sl in s.inventory.slots_of_type("StallTable"):
-		for i in sl.stack.height():
-			if taken.has(sl.stack.items[i].id):
-				continue
-			var m := c.match_score(sl.stack.items[i].sku_id)
-			# 越靠上越容易被看到
-			var vis := 1.0 - 0.1 * sl.stack.count_above(i)
-			if best.is_empty() or m * vis > float(best["score"]):
-				best = {"slot_id": sl.id, "index": i, "item_id": sl.stack.items[i].id, "match": m, "score": m * vis}
-	return best
+	for ei in ctx.remaining_expectations(c):
+		var best := {}
+		for sl in s.inventory.slots_of_type("StallTable"):
+			for i in sl.stack.height():
+				var item: ScarfItem = sl.stack.items[i]
+				if taken.has(item.id):
+					continue
+				var seen := _see(v, sl, i)
+				if not seen["noticed"]:
+					continue
+				var d := AttrDistance.to_expectation(seen["sku"], c.expectations[ei])
+				if d <= tol and (best.is_empty() or d < float(best["d"])):
+					best = {"item_id": item.id, "slot_id": sl.id, "index": i, "perceived_sku": seen["sku"],
+						"exp_index": ei, "d": d, "tol": tol}
+		if not best.is_empty():
+			return best
+	return {}
 
 
 ## 客人看中的那份货现在在哪：{slot_id, index}；已不在摊位上（也不在你手上）则为空。
@@ -215,31 +318,34 @@ func find_sku(sku_id: String) -> Dictionary:
 	return {}
 
 
-## 为客人开一个议价。看中的货已经不在（卖掉 / 塌了 / 被挪走）时换一份，没有就返回 null。
-## 心理价按同次购物上下文波动；买过东西的客人可以「一起买」，再配一条他也看得上的。
+## 为客人开一个议价。挑中的货已经不在（卖掉 / 塌了 / 被挪走 / 许给了别人）时当场重挑，没有就返回 null。
+## 买过东西的客人可以「一起买」，再配一条他也看得上的。
 func start_haggle(v: Dictionary) -> HaggleState:
-	var loc := locate(v["item_id"])
-	if loc.is_empty() or _promised_items().has(v["item_id"]):
-		var best := _best_item_for(v["customer"])
-		if best.is_empty():
+	var pick: Dictionary = v.get("pick", {})
+	var loc := locate(v["item_id"]) if v["item_id"] != "" else {}
+	if pick.is_empty() or loc.is_empty() or _promised_items().has(v["item_id"]):
+		pick = _pick(v)
+		if pick.is_empty():
 			return null
-		v["item_id"] = best["item_id"]
-		loc = best
-	var sl: Slot = s.inventory.slots[loc["slot_id"]]
-	var sku_id: String = sl.stack.items[loc["index"]].sku_id
-	var asking := price_of(sku_id)
+		v["pick"] = pick
+		v["item_id"] = pick["item_id"]
+		loc = pick
 	var c: CustomerProfile = v["customer"]
 	var ctx: VisitContext = v["ctx"]
-	ctx.set_budget_from(c, sku_id)
+	var sl: Slot = s.inventory.slots[loc["slot_id"]]
+	var sku_id: String = sl.stack.items[loc["index"]].sku_id
+	ctx.set_budget_from(c, pick["perceived_sku"])
 	var mods := SkillSystem.haggle_mods(s.player)
+	var setup := {"perceived_sku": pick["perceived_sku"], "expectation": c.expectations[int(pick["exp_index"])],
+		"tol": pick["tol"], "initiative": v.get("initiative", false), "p_adj": v.get("p_adj", 0.0)}
 	v["state"] = "haggling"
-	var h := HaggleState.start(c, sku_id, asking, mods, ctx)
+	var h := HaggleState.start(c, sku_id, price_of(sku_id), setup, mods, ctx, s.rng)
 	if ctx.basket_count >= 1:
-		var extra := _best_item_for(c, [v["item_id"]])
-		if not extra.is_empty() and float(extra["match"]) > 0.0:
+		var extra := _pick(v, [v["item_id"]])
+		if not extra.is_empty():
 			var extra_sku: String = s.inventory.slots[extra["slot_id"]].stack.items[extra["index"]].sku_id
-			h.bundle_extra = {"item_id": extra["item_id"], "sku_id": extra_sku,
-				"reserve": HaggleState.reserve_for(c, extra_sku, mods, ctx)}
+			h.bundle_extra = {"item_id": extra["item_id"], "sku_id": extra_sku, "exp_index": extra["exp_index"],
+				"reserve": HaggleState.reserve_for(c, extra["perceived_sku"], mods)}
 	return h
 
 
@@ -248,26 +354,37 @@ func price_of(sku_id: String) -> float:
 
 
 ## 议价结束。成交 → 客人等你拿货（waiting_item），不自动出货；没谈成 → 离开。
+## 被价格吓跑计 scared_off；耐心用完走的常客回购率扣一点；嘟囔难听话会让摊前其他客人 P −0.05。
 func finish(v: Dictionary, h: HaggleState) -> void:
 	var ctx: VisitContext = v["ctx"]
+	var c: CustomerProfile = v["customer"]
+	if h != null:
+		ctx.add_rapport(h.rapport_delta)
+		ctx.patience_left = maxi(h.patience_left, 0)
+		if h.grumbled:
+			for o in visitors:
+				if o != v:
+					o["p_adj"] = float(o.get("p_adj", 0.0)) - 0.05
 	if h == null or h.result != "deal":
-		if h != null:
-			ctx.add_rapport(h.rapport_delta)
+		if h != null and h.result == "scared_off":
+			s.period_stats["scared_off"] = int(s.period_stats.get("scared_off", 0)) + 1
+		if h != null and h.ran_out:
+			s.customers.penalize(c, 0.05)
 		_leave(v)
 		return
-	ctx.add_rapport(h.rapport_delta)
-	ctx.patience = maxf(h.patience_left, 0.05)
-	var want := [{"item_id": v["item_id"], "sku_id": h.sku_id, "price": h.final_price, "reserve": h.reserve, "done": false}]
+	v["p_final"] = h.p_final
+	var want := [{"item_id": v["item_id"], "sku_id": h.sku_id, "price": h.final_price, "reserve": h.reserve,
+		"exp_index": int(v["pick"].get("exp_index", 0)), "done": false}]
 	if h.bundle:
 		var r2 := float(h.bundle_extra["reserve"])
 		var total := h.total_reserve()
 		want[0]["price"] = h.final_price * h.reserve / total
 		want.append({"item_id": h.bundle_extra["item_id"], "sku_id": h.bundle_extra["sku_id"],
-			"price": h.final_price * r2 / total, "reserve": r2, "done": false})
+			"price": h.final_price * r2 / total, "reserve": r2, "exp_index": int(h.bundle_extra["exp_index"]), "done": false})
 	v["want"] = want
 	v["hint"] = _describe_want(want)
 	v["state"] = "waiting_item"
-	v["wait"] = wait_for_item(v["customer"])
+	v["wait"] = wait_for_item(c)
 
 
 ## 等货时间：约 20 + 40·patience 秒，口才 Lv5 减缓。
@@ -328,8 +445,7 @@ func deliver(v: Dictionary, hand: Slot) -> Dictionary:
 		ctx.wrong_deliveries += 1
 		ctx.add_rapport(-0.3)
 		if ctx.wrong_deliveries >= 2:
-			_lose_deal(v)
-			s.customers.penalize(c, 0.05)
+			_lose_deal(v, 0.15)
 			_leave(v)
 			out["result"] = "wrong_left"
 		else:
@@ -343,14 +459,17 @@ func deliver(v: Dictionary, hand: Slot) -> Dictionary:
 			out["result"] = "partial"
 			return out
 	out["result"] = "ok"
+	for w in v["want"]:
+		if not ctx.done_expectations.has(w["exp_index"]):
+			ctx.done_expectations.append(w["exp_index"])
 	v["want"] = []
-	# 交齐了：可能接着逛（回到浏览，耐心部分恢复），否则走人
-	var next := _best_item_for(c)
-	if not next.is_empty() and s.rng.chance(ctx.continue_p(c)):
-		ctx.patience = ctx.patience + (c.patience - ctx.patience) * 0.5
-		v["item_id"] = next["item_id"]
+	# 交齐了：可能拿剩下的预期值再逛一轮（06 §3.5），耐心恢复一半；否则走人
+	if s.rng.chance(ctx.again_p(c, float(v["p_final"]))):
+		ctx.patience_left += (c.patience_n - ctx.patience_left) / 2
+		v["item_id"] = ""
+		v["pick"] = {}
 		v["state"] = "browsing"
-		v["wait"] = 15.0 + 40.0 * ctx.patience
+		v["wait"] = browse_time(c)
 		out["continued"] = true
 	else:
 		_leave(v)

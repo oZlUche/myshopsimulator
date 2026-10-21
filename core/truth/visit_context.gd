@@ -1,6 +1,6 @@
 class_name VisitContext
 extends RefCounted
-## 真相层：同次购物上下文（01 §4.3）。客人在摊前从来到走，买了几件、花了多少、对你印象如何。
+## 真相层：同次购物上下文（01 §4.3、06 §3.5）。客人在摊前从来到走，买了几件、花了多少、对你印象如何。
 ## 客人离开即销毁，不进存档。
 
 ## 一次逛摊的总预算按"几件他第一眼看中的那款"算
@@ -13,13 +13,18 @@ var rapport: float = 0.0
 var wrong_deliveries: int = 0
 ## 本次逛摊的总预算（元），第一次问价时按那款的基准价定
 var budget: float = 0.0
-## 剩余耐心：议价消耗，成交交货后部分恢复
-var patience: float = 0.6
+## 剩余耐心次数：议价消耗，成交交货后恢复一半；−1 = 还没讲过价
+var patience_left: int = -1
+## 这次来摊的容差随机偏移（±0.05，06 §2）
+var tol_offset: float = 0.0
+## 已经买到的预期值序号
+var done_expectations: Array = []
 
 
-static func create(c: CustomerProfile) -> VisitContext:
+static func create(_c: CustomerProfile, rng: GameRng = null) -> VisitContext:
 	var ctx := VisitContext.new()
-	ctx.patience = c.patience
+	if rng != null:
+		ctx.tol_offset = rng.randf_range(-0.05, 0.05)
 	return ctx
 
 
@@ -41,14 +46,28 @@ func budget_ratio() -> float:
 	return clampf(budget_left() / budget, 0.0, 1.0) if budget > 0.0 else 1.0
 
 
-## ρ：熟了、好说话 → 给个好价（心理价上浮）。
+## 这次来摊的挑选容差：派生容差 + 来摊偏移 + 口才 Lv4 放宽。
+func tolerance(c: CustomerProfile, tol_add: float = 0.0) -> float:
+	return maxf(0.05, c.tolerance + tol_offset + tol_add)
+
+
+## 还没买到的预期值序号（按优先级）。
+func remaining_expectations(c: CustomerProfile) -> Array:
+	var out: Array = []
+	for i in c.expectations.size():
+		if not done_expectations.has(i):
+			out.append(i)
+	return out
+
+
+## ρ：熟了、随和 → 给个好价（心理价上浮）。
 static func rho(c: CustomerProfile) -> float:
-	return 0.05 + 0.15 * c.kindness + 0.1 * minf(float(c.visits), 6.0) / 6.0
+	return 0.05 + 0.15 * c.trait_of("agreeable") + 0.1 * minf(float(c.visits), 6.0) / 6.0
 
 
-## δ：爱砍价、不好说话 → 买多要优惠（心理价下压）。
+## δ：精算、爱直接砍价 → 买多要优惠（心理价下压）。
 static func delta(c: CustomerProfile) -> float:
-	return 0.04 + 0.12 * (1.0 - c.kindness) + (0.1 if c.haggle_strategy == "direct_discount" else 0.0)
+	return 0.04 + 0.12 * c.trait_of("shrewd") + (0.1 if c.haggle_strategy == "direct_discount" else 0.0)
 
 
 ## 随件数递增、趋于饱和：0 件 0，1 件 ≈0.49，2 件 ≈0.74，… → 1。
@@ -56,20 +75,11 @@ static func g(n: int) -> float:
 	return 1.0 - exp(-0.67 * n)
 
 
-## 下一件的心理价：reserve' = reserve_base × (1 + ρ·rapport) × (1 − δ·g(basket_count))，不超过剩余预算。
+## 好感与件数修正后的心理价：reserve_base × (1 + ρ·rapport) × (1 − δ·g(basket_count))，不超过剩余预算。
+## 浮动心理价 R_float 再乘成交可能性 P（HaggleState.r_float）。
 func drift_reserve(c: CustomerProfile, reserve_base: float) -> float:
 	var r := reserve_base * (1.0 + rho(c) * rapport) * (1.0 - delta(c) * g(basket_count))
 	return minf(r, budget_left()) if budget > 0.0 else r
-
-
-## 熟了好说话的客人：成交门槛放宽一点。
-func accept_bonus(c: CustomerProfile) -> float:
-	return 0.15 * rho(c) * maxf(rapport, 0.0)
-
-
-## 熟了好说话的客人：开口价离心理价更近，少磨几轮。
-func anchor_bonus(c: CustomerProfile) -> float:
-	return 0.4 * rho(c) * maxf(rapport, 0.0)
 
 
 ## 买过以后会不会要求"买两条便宜点"。
@@ -77,9 +87,10 @@ func wants_bulk_discount(c: CustomerProfile) -> bool:
 	return basket_count >= 1 and delta(c) * g(basket_count) > rho(c) * maxf(rapport, 0.0)
 
 
-## 交货后继续逛的概率：intent × f_budget × (0.5 + 0.5·rapport) × (1 − 0.3·hesitation)，常客额外 +。
-func continue_p(c: CustomerProfile) -> float:
-	var p := c.intent * budget_ratio() * (0.5 + 0.5 * rapport) * (1.0 - 0.3 * c.hesitation)
-	if c.is_regular:
-		p += 0.1
+## 交货后再逛的概率（06 §3.5）：
+## clamp(P_final, 0, 1) · (0.4 + 0.4·外向 + 0.2·intent − 0.3·hesitation) · [还有没买到的预期] · f_budget。
+func again_p(c: CustomerProfile, p_final: float) -> float:
+	if remaining_expectations(c).is_empty():
+		return 0.0
+	var p := clampf(p_final, 0.0, 1.0) * (0.4 + 0.4 * c.trait_of("sociable") + 0.2 * c.intent - 0.3 * c.hesitation) * budget_ratio()
 	return clampf(p, 0.0, 0.95)

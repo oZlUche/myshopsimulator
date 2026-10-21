@@ -4,26 +4,29 @@ extends RefCounted
 ## 每条提示带 precision：0 定性 / 1 区间 / 2 精确，上限由数学能手决定。
 
 
-## 客人观察（02 §2.3）：返回玩家能看到的客人信息。
-static func customer_hint(c: CustomerProfile, player: PlayerState, sku_for_budget: String = "") -> Dictionary:
+## 客人观察（02 §2.3 → 06 §4）：Lv1 第一条想要的；Lv2 剩余耐心次数；Lv3 预算；Lv4 两三个性格词；Lv5 回头倾向。
+## patience_left 为正在讲价时剩几次（−1 表示还没讲价，按他的耐心总数说）。
+static func customer_hint(c: CustomerProfile, player: PlayerState, sku_for_budget: String = "", patience_left: int = -1) -> Dictionary:
 	var lv := player.skill_level("customer_observation")
 	var prec := SkillSystem.precision_cap(player)
 	var a := DataDB.attributes()
 	var h := {"precision": prec}
-	if lv >= 1:
+	if lv >= 1 and not c.expectations.is_empty():
+		var pref := c.preference
 		h["preference"] = "想要%s、%s、%s" % [
-			a["colors"][c.preference["color"]]["name"],
-			a["patterns"][c.preference["pattern"]]["name"],
-			a["materials"][c.preference["material"]]["name"],
+			a["colors"][pref["color"]]["name"],
+			a["patterns"][pref["pattern"]]["name"],
+			a["materials"][pref["material"]]["name"],
 		]
 	if lv >= 2:
-		h["patience"] = _qual(c.patience, ["没耐心", "一般", "很有耐心"], prec)
+		h["patience"] = ("还能磨 %d 次" % patience_left) if patience_left >= 0 else ("大概能磨 %d 次" % c.patience_n)
 	if lv >= 3 and sku_for_budget != "":
 		var r := c.reserve_price(sku_for_budget)
 		h["budget"] = ["预算不太宽裕" if r < float(DataDB.sku(sku_for_budget)["base_price"]) else "预算挺足",
 			"约 %d–%d 元" % [roundi(r * 0.85), roundi(r * 1.15)], "%d 元" % roundi(r)][prec]
 	if lv >= 4:
-		h["strategy"] = {"direct_discount": "爱直接砍价", "fake_leave": "会装作要走", "tug_of_war": "喜欢拉锯"}[c.haggle_strategy]
+		var words := Personality.describe(c.personality)
+		h["strategy"] = "、".join(words) if not words.is_empty() else "看不出什么特别"
 	if lv >= 5:
 		h["loyalty"] = _qual(c.loyalty_base, ["不太会再来", "可能再来", "很可能成为常客"], prec)
 	return h

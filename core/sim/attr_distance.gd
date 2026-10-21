@@ -6,6 +6,8 @@ extends RefCounted
 
 ## 认错概率 = CONFUSE_SCALE × 相似度²，对所有别的图案求和（纯色约 2%，图案款 10%–16%）
 const CONFUSE_SCALE := 0.32
+## 客人从外面猜材质（06 §2：材质看不出来，只能按外观猜）：猜成 q 的概率 = MATERIAL_GUESS_SCALE × 相似度²
+const MATERIAL_GUESS_SCALE := 0.5
 const DEFAULT_WEIGHT := {"color": 0.4, "material": 0.3, "pattern": 0.3}
 
 
@@ -66,11 +68,20 @@ static func initial_p(d: float, tol: float) -> float:
 
 ## 翻看时把这款图案认成别的图案的概率：{别的图案: 概率}。
 static func pattern_confusion(p: String) -> Dictionary:
+	return _confusion("patterns", "pattern_similarity", p, CONFUSE_SCALE)
+
+
+## 客人从外面看把这种材质猜成别的材质的概率：{别的材质: 概率}。
+static func material_confusion(m: String) -> Dictionary:
+	return _confusion("materials", "material_similarity", m, MATERIAL_GUESS_SCALE)
+
+
+static func _confusion(kind: String, table: String, v: String, scale: float) -> Dictionary:
 	var out := {}
-	for q in DataDB.attributes()["patterns"]:
-		if q == p:
+	for q in DataDB.attributes()[kind]:
+		if q == v:
 			continue
-		var sim := pattern_similarity(p, q)
+		var sim := _sim(table, v, q)
 		if sim > 0.0:
-			out[q] = CONFUSE_SCALE * sim * sim
+			out[q] = scale * sim * sim
 	return out

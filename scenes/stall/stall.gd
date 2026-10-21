@@ -41,6 +41,7 @@ func _ready() -> void:
 	session.passerby.connect(func(stayed): _area.add_walker(stayed))
 	session.visitor_arrived.connect(_on_visitor_arrived)
 	session.visitor_left.connect(_on_visitor_left)
+	session.self_served.connect(_on_self_served)
 	_build()
 	_area.visitor_clicked.connect(_on_visitor_clicked)
 	_say("找好位置了。先把行囊里的货摆到摊位上，然后开张。时间还没开始走。")
@@ -214,7 +215,7 @@ func _visitor_text(v: Dictionary) -> String:
 		"waiting_item":
 			return "#%d%s 谈好了，等你拿货，还能等 %d 秒 → 交货" % [num, regular, int(float(v["wait"]))]
 		_:
-			return "#%d%s 在看货" % [num, regular]
+			return "#%d%s 在挑货" % [num, regular]
 
 
 func _refresh_visitors() -> void:
@@ -368,10 +369,19 @@ func _on_visitor_arrived(v: Dictionary) -> void:
 func _on_visitor_left(v: Dictionary) -> void:
 	if v == _haggle_visitor:
 		return
-	if v["state"] == "left" and not v["want"].is_empty() and phase == Phase.OPEN:
+	if v["state"] == "left" and v["want"].any(func(w): return not w["done"]) and phase == Phase.OPEN:
 		var num: int = _area.visitor_numbers.get(v["customer"].id, 0)
 		if v["ctx"].wrong_deliveries < 2:
 			_say("[color=#e05a4f]#%d 等不到货，走了。这单黄了。[/color]" % num)
+
+
+## 等货等到头，客人自己从摊上拿了（06 §3.6）。
+func _on_self_served(v: Dictionary, r: Dictionary) -> void:
+	var num: int = _area.visitor_numbers.get(v["customer"].id, 0)
+	_say("#%d 等不及，自己上手从摊上拿走了那条，钱放下了。" % num)
+	if r.get("collapsed", false):
+		_say("[color=#e05a4f]他硬抽的时候上面的货塌了一地！[/color]")
+	_refresh_slots()
 
 
 ## 点客人（右侧名单或场景里的人）：问价中 → 去讲价；等货中 → 交货；看货中 → 不理会（预留"招呼"）。
@@ -429,7 +439,7 @@ func _refresh_haggle() -> void:
 	var c := _haggle.customer
 	var num: int = _area.visitor_numbers.get(c.id, 0)
 	_haggle_box.add_child(UIKit.label("客人 #%d%s" % [num, "（常客）" if c.is_regular else ""], 16, UIKit.ACCENT))
-	var hint := Sampler.customer_hint(c, s.player, _haggle.sku_id)
+	var hint := Sampler.customer_hint(c, s.player, _haggle.perceived_sku, _haggle.patience_left)
 	var hint_lines: Array = []
 	for key in ["preference", "patience", "budget", "strategy", "loyalty"]:
 		if hint.has(key):
@@ -438,7 +448,7 @@ func _refresh_haggle() -> void:
 		hint_lines.append("（看不出这人的心思。学【客人观察】能看得更多。）")
 	for l in hint_lines:
 		_haggle_box.add_child(UIKit.label(l, 13, UIKit.MUTED))
-	_haggle_box.add_child(UIKit.label("他指着摊上白框那份。你的开价：%d 元" % roundi(_haggle.asking_price), 14))
+	_haggle_box.add_child(UIKit.label("他指着摊上白框那份。标价：%d 元" % roundi(_haggle.asking_price), 14))
 	_haggle_box.add_child(UIKit.label("「%s」" % _haggle.last_line, 18))
 	if _haggle.result != "ongoing":
 		_haggle_box.add_child(UIKit.button("好", _end_haggle))
@@ -447,11 +457,23 @@ func _refresh_haggle() -> void:
 	_price_spin = SpinBox.new()
 	_price_spin.min_value = 1
 	_price_spin.max_value = 9999
-	_price_spin.value = roundf(maxf(_haggle.customer_offer + 1.0, (_haggle.asking_price + _haggle.customer_offer) * 0.5))
+	var start_q := _haggle.asking_price if _haggle.last_quote <= 0.0 else _haggle.last_quote
+	if _haggle.customer_offer > 0.0:
+		start_q = maxf(_haggle.customer_offer + 1.0, (start_q + _haggle.customer_offer) * 0.5)
+	_price_spin.value = roundf(start_q)
 	row.add_child(_price_spin)
 	row.add_child(UIKit.button("报这个价", func(): _haggle.offer_price(_price_spin.value, s.rng); _after_haggle_step(), 14))
 	_haggle_box.add_child(row)
-	_haggle_box.add_child(UIKit.button("就按 %d 元卖给你" % roundi(_haggle.customer_offer), func(): _haggle.accept_customer_offer(); _after_haggle_step(), 14))
+	if _haggle.customer_offer > 0.0:
+		_haggle_box.add_child(UIKit.button("就按 %d 元卖给你" % roundi(_haggle.customer_offer), func(): _haggle.accept_customer_offer(); _after_haggle_step(), 14))
+	# 三个策略：各缩小一个维度的差距，说真话容易成，吹嘘可能被识破（06 §3.4）
+	var srow := UIKit.hbox(6)
+	for dim in HaggleState.STRATEGIES:
+		var b := UIKit.button("【%s】" % HaggleState.STRATEGIES[dim], func(): _haggle.use_strategy(dim, s.rng); _after_haggle_step(), 14)
+		b.disabled = _haggle.strategies_used.has(dim)
+		b.tooltip_text = "「%s」每个方面对同一份货只能说一次。" % HaggleState.STRATEGY_LINES[dim]
+		srow.add_child(b)
+	_haggle_box.add_child(srow)
 	for id in HaggleState.OPTIONS:
 		_haggle_box.add_child(UIKit.button("「%s」" % HaggleState.OPTIONS[id], func(): _haggle.choose_option(id, s.rng); _after_haggle_step(), 14))
 	if _haggle.bundle_available():
@@ -481,6 +503,10 @@ func _end_haggle() -> void:
 	session.finish(v, h)
 	if v["state"] == "waiting_item":
 		_say("[color=#6cc070]谈成了，%d 元%s。[/color]把他要的那份拿到手上，再点他交货。" % [roundi(h.final_price), "（两条）" if h.bundle else ""])
+	elif h != null and h.result == "scared_off":
+		_say("[color=#e05a4f]价报高了，把人吓跑了。[/color]")
+	elif h != null and h.grumbled:
+		_say("[color=#e05a4f]他嘟囔着走了，旁边看货的人都听见了。[/color]")
 	_refresh_all()
 
 

@@ -14,20 +14,24 @@ func _session() -> StallSession:
 	return StallSession.new(s, x)
 
 
-func _customer(s: GameState, kindness := 0.5, strategy := "tug_of_war") -> CustomerProfile:
+## agreeable 随和、shrewd 精算（决定 ρ、δ）；不会再逛、不会自己上手拿。
+func _customer(s: GameState, agreeable := 0.5, strategy := "tug_of_war", shrewd := 0.5) -> CustomerProfile:
 	var c := CustomerProfile.new()
 	c.id = s.customers.new_customer_id()
+	c.personality = {"sociable": 0.5, "shrewd": shrewd, "composed": 0.5, "fastidious": 0.5, "agreeable": agreeable}
+	c.derived = Personality.derive(c.personality)
 	c.preference = {"color": "red", "pattern": "solid", "material": "wool"}
-	c.patience = 0.6
+	c.patience_n = 6
 	c.intent = 0.0
-	c.kindness = kindness
+	c.self_serve = 0.0
 	c.haggle_strategy = strategy
 	return c
 
 
+## 一位正在问价、会主动开价的客人（挑货在 start_haggle 里当场完成）。
 func _visitor(ss: StallSession, c: CustomerProfile, item_id: String) -> Dictionary:
 	var v := {"customer": c, "ctx": VisitContext.create(c), "item_id": item_id, "state": "asking",
-		"wait": 30.0, "want": [], "hint": ""}
+		"wait": 30.0, "pick": {}, "initiative": true, "p_adj": 0.0, "p_final": 0.0, "want": [], "hint": "", "seen": {}}
 	ss.visitors.append(v)
 	return v
 
@@ -117,10 +121,29 @@ func test_timeout_counts_lost_deal_and_hurts_regular() -> void:
 	var p0: float = ss.s.customers.return_probability[c.id]
 	var v := _visitor(ss, c, t.stack.items[0].id)
 	_deal(ss, v)
+	ss.api.take_top_to_hand(t.id)   # 拿到手上却一直没点他
 	ss.tick(float(v["wait"]) + 1.0)
 	assert_eq(v["state"], "left")
 	assert_eq(int(ss.s.period_stats["lost_after_deal"]), 1)
 	assert_true(float(ss.s.customers.return_probability[c.id]) < p0, "常客没拿到货回购率下降")
+
+
+func test_self_serve_when_goods_still_on_table() -> void:
+	var ss := _session()
+	var t := _table(ss, [RED, BLUE])
+	var c := _customer(ss.s)
+	c.self_serve = 1.0
+	var v := _visitor(ss, c, t.stack.items[0].id)
+	var h := _deal(ss, v)
+	var got := []
+	ss.self_served.connect(func(vv, r): got.append(r))
+	var cash := ss.s.player.cash
+	ss.tick(float(v["wait"]) + 1.0)
+	assert_eq(got.size(), 1, "等不到人，自己上手拿")
+	assert_eq(int(ss.s.period_stats["sales"]), 1)
+	assert_near(ss.s.player.cash, cash + h.final_price, 0.0001, "按谈好的价付钱")
+	assert_eq(int(ss.s.period_stats["lost_after_deal"]), 0)
+	assert_eq(v["state"], "left")
 
 
 func test_several_customers_wait_at_once() -> void:
@@ -144,19 +167,19 @@ func test_reserve_drifts_with_visit_context() -> void:
 	ctx.basket_count = 1
 	ctx.rapport = 1.0
 	var base := HaggleState.reserve_for(kind, RED)
-	assert_true(HaggleState.reserve_for(kind, RED, {}, ctx) > base, "熟了好说话：给个好价")
-	var tough := _customer(s, 0.0, "direct_discount")
+	assert_true(ctx.drift_reserve(kind, base) > base, "熟了好说话：给个好价")
+	var tough := _customer(s, 0.0, "direct_discount", 1.0)
 	var ctx2 := VisitContext.create(tough)
 	ctx2.set_budget_from(tough, RED)
 	ctx2.basket_count = 2
 	var base2 := HaggleState.reserve_for(tough, RED)
-	assert_true(HaggleState.reserve_for(tough, RED, {}, ctx2) < base2, "爱砍价：买多要优惠")
-	var h := HaggleState.start(tough, RED, 100.0, {}, ctx2)
+	assert_true(ctx2.drift_reserve(tough, base2) < base2, "爱砍价：买多要优惠")
+	var h := HaggleState.start(tough, RED, 100.0, {"initiative": true}, {}, ctx2, GameRng.new(1))
 	assert_true(h.last_line.contains("便宜点"), h.last_line)
-	# 预算花得差不多了，心理价被剩余预算封顶
+	# 预算花得差不多了，心理价被剩余预算封顶，也不会再逛
 	ctx2.spent = ctx2.budget - 1.0
-	assert_true(HaggleState.reserve_for(tough, RED, {}, ctx2) <= 1.0 + 0.0001)
-	assert_true(ctx2.continue_p(tough) < 0.05)
+	assert_true(ctx2.drift_reserve(tough, base2) <= 1.0 + 0.0001)
+	assert_true(ctx2.again_p(tough, 1.0) < 0.05)
 
 
 func test_bundle_sells_two_for_one_total() -> void:
@@ -186,7 +209,7 @@ func test_bundle_failure_costs_more_patience() -> void:
 	var v := _visitor(ss, _customer(ss.s), t.stack.items[0].id)
 	v["ctx"].basket_count = 1
 	var h := ss.start_haggle(v)
-	var single := HaggleState.start(v["customer"], RED, h.asking_price, {}, v["ctx"])
+	var single := HaggleState.start(v["customer"], RED, h.asking_price, {"initiative": true}, {}, v["ctx"], ss.s.rng)
 	var p0 := h.patience_left
 	h.offer_bundle(99999.0, ss.s.rng)
 	single.offer_price(99999.0, ss.s.rng)
