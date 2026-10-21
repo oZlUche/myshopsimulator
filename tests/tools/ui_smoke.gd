@@ -126,14 +126,52 @@ func _init() -> void:
 	await shot("5_haggle_step")
 	st._haggle.accept_customer_offer()
 	st._refresh_haggle()
+	var buyer = st._haggle_visitor
 	st._end_haggle()
-	if st._minigame != null:
-		await good_pull(st)
-	for i in 600: st._process(1.0)
+	assert(buyer["state"] == "waiting_item", "谈成后应等你拿货，不自动出货：%s" % buyer["state"])
+	var sales0 = s.period_stats["sales"]
+	# 手上空着点他：只提示他要哪份，不扣等待时间
+	while hand.stack.height() > 0:
+		st._on_slot(tables[2].id)
+	var w0 = buyer["wait"]
+	st._on_visitor_clicked(buyer)
+	assert(buyer["state"] == "waiting_item" and buyer["wait"] == w0)
+	# 找到他要的那份拿到手上（在顶上就拿顶，否则抽），再点他交货
+	var want = buyer["want"][0]
+	var loc = st.session.locate(want["item_id"])
+	if loc.is_empty():
+		loc = st.session.find_sku(want["sku_id"])
+	var sl = s.inventory.slots[loc["slot_id"]]
+	if loc["index"] == sl.stack.height() - 1:
+		st._on_top(sl.id)
+	else:
+		st._on_strip(sl.id, loc["index"])
+		if st._minigame != null:
+			await good_pull(st)
+	assert(hand.stack.height() == 1)
+	st._refresh_all()
+	await shot("5b_waiting_item")
+	st._on_visitor_clicked(buyer)
+	assert(s.period_stats["sales"] == sales0 + 1, "交货后才算卖出")
+	assert(hand.stack.height() == 0)
+	for i in 300: st._process(1.0)
 	await shot("6_stall_later")
-	st._on_main_button()
+	# 卖光：把剩下的货都清掉、客人散去，应自动收摊进结算，并标记卖光
+	if st._haggle != null:
+		st._haggle.choose_option("suggest_other", s.rng)
+		st._end_haggle()
+	st.session.close()
+	for t in ["StallTable", "Hand", "Bag"]:
+		for x2 in s.inventory.slots_of_type(t):
+			x2.stack.items.clear()
+			x2.stack.collapsed_pile.clear()
+	st.speed = 1.0
+	for i in 8:
+		if current_scene != st:
+			break
+		st._process(1.0)
 	for i in 8: await process_frame
 	await shot("7_settlement")
-	var ok = s.clock.period == 2 and current_scene.name == "Settlement"
-	print("UI_SMOKE ", "PASS" if ok else "FAIL", " period=", s.clock.period)
+	var ok = s.clock.period == 2 and current_scene.name == "Settlement" and G.last_report.get("sold_out", false)
+	print("UI_SMOKE ", "PASS" if ok else "FAIL", " period=", s.clock.period, " sold_out=", G.last_report.get("sold_out", false))
 	quit(0 if ok else 1)

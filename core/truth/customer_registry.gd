@@ -27,6 +27,12 @@ func record_purchase(c: CustomerProfile, paid: float, reserve: float, loyalty_bo
 	return_probability[c.id] = clampf(p, 0.0, 0.95)
 
 
+## 谈成了却没拿到货 / 被递错货走掉：常客回购率下降（01 §6.4）。过路客不登记。
+func penalize(c: CustomerProfile, amount: float) -> void:
+	if return_probability.has(c.id):
+		return_probability[c.id] = clampf(float(return_probability[c.id]) - amount, 0.0, 0.95)
+
+
 ## 本旬会回来的常客列表。
 func roll_returning(rng: GameRng) -> Array[CustomerProfile]:
 	var out: Array[CustomerProfile] = []

@@ -13,10 +13,12 @@ func _ready() -> void:
 	p.add_child(v)
 	var r := Game.last_report
 	v.add_child(UIKit.label("%s · 结算" % r.get("label", ""), 26, UIKit.ACCENT))
+	if r.get("sold_out", false):
+		v.add_child(UIKit.label("卖光！货全卖完，提前收摊了。", 20, UIKit.GOOD))
 	var profit := float(r.get("revenue", 0.0)) - float(r.get("purchases", 0.0))
 	for line in [
 		"路过摊位的人：%d　停下来看的：%d　成交：%d 件" % [r.get("traffic", 0), r.get("stayed", 0), r.get("sales", 0)],
-		"没顾上理会就走掉的客人：%d" % r.get("ignored", 0),
+		"没顾上理会就走掉的客人：%d　谈成没拿到货：%d" % [r.get("ignored", 0), r.get("undelivered", 0)],
 		"营业额：%.1f 元　本旬进货：%.1f 元　进出相抵：%+.1f 元" % [r.get("revenue", 0.0), r.get("purchases", 0.0), profit],
 		"货堆倒塌：%d 次　收摊时行囊装不下丢掉：%d 件" % [r.get("collapses", 0), r.get("lost_on_pack_up", 0)],
 		"获得经验：%.0f" % r.get("xp_earned", 0.0),

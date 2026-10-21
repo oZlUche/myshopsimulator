@@ -1,0 +1,212 @@
+extends TestCase
+## 成交后手动交货、同次购物上下文、卖光（01 §4.3、§6.4、§6.9）。
+
+const RED := "scarf_solid_red_wool"
+const BLUE := "scarf_solid_navy_wool"
+
+
+func _session() -> StallSession:
+	var s := GameState.new_game(5)
+	PeriodRunner.begin_period(s)
+	var x := 0.5
+	while not s.street.can_place(x):
+		x += 0.5
+	return StallSession.new(s, x)
+
+
+func _customer(s: GameState, kindness := 0.5, strategy := "tug_of_war") -> CustomerProfile:
+	var c := CustomerProfile.new()
+	c.id = s.customers.new_customer_id()
+	c.preference = {"color": "red", "pattern": "solid", "material": "wool"}
+	c.patience = 0.6
+	c.intent = 0.0
+	c.kindness = kindness
+	c.haggle_strategy = strategy
+	return c
+
+
+func _visitor(ss: StallSession, c: CustomerProfile, item_id: String) -> Dictionary:
+	var v := {"customer": c, "ctx": VisitContext.create(c), "item_id": item_id, "state": "asking",
+		"wait": 30.0, "want": [], "hint": ""}
+	ss.visitors.append(v)
+	return v
+
+
+## 摆几份货到第一格摊位，返回该格。
+func _table(ss: StallSession, skus: Array) -> Slot:
+	var t: Slot = ss.s.inventory.slots_of_type("StallTable")[0]
+	for sku in skus:
+		ss.api.place_on_top(ss.s.inventory.create_item(sku), t.id)
+	return t
+
+
+## 谈成一单：客人直接接受你的报价。
+func _deal(ss: StallSession, v: Dictionary) -> HaggleState:
+	var h := ss.start_haggle(v)
+	h.accept_customer_offer()
+	ss.finish(v, h)
+	return h
+
+
+func test_deal_waits_for_item_then_delivers() -> void:
+	var ss := _session()
+	var t := _table(ss, [RED, BLUE])
+	var v := _visitor(ss, _customer(ss.s), t.stack.items[0].id)
+	var cash := ss.s.player.cash
+	var h := _deal(ss, v)
+	assert_eq(v["state"], "waiting_item", "谈成后进入等货")
+	assert_eq(int(ss.s.period_stats["sales"]), 0, "不自动出货")
+	assert_eq(t.stack.height(), 2)
+	assert_true(String(v["hint"]).contains("摊位 1"), "提示按你看到的位置描述：%s" % v["hint"])
+	var hand := ss.s.inventory.hand()
+	var r := ss.api.pull_item(t.id, 0)
+	ss.api.place_on_top(r["item"], hand.id)
+	var d := ss.deliver(v, hand)
+	assert_eq(d["result"], "ok")
+	assert_eq(int(ss.s.period_stats["sales"]), 1)
+	assert_near(ss.s.player.cash, cash + h.final_price)
+	assert_eq(hand.stack.height(), 0)
+	assert_eq(v["ctx"].basket_count, 1)
+
+
+func test_same_sku_other_item_is_accepted() -> void:
+	var ss := _session()
+	var t := _table(ss, [RED, RED])
+	var v := _visitor(ss, _customer(ss.s), t.stack.items[0].id)
+	_deal(ss, v)
+	var hand := ss.s.inventory.hand()
+	ss.api.take_top_to_hand(t.id)   # 拿的是上面那份同款
+	assert_eq(ss.deliver(v, hand)["result"], "ok")
+
+
+func test_empty_hand_only_hints() -> void:
+	var ss := _session()
+	var t := _table(ss, [RED])
+	var v := _visitor(ss, _customer(ss.s), t.stack.items[0].id)
+	_deal(ss, v)
+	var w := float(v["wait"])
+	assert_eq(ss.deliver(v, ss.s.inventory.hand())["result"], "empty")
+	assert_eq(v["state"], "waiting_item")
+	assert_near(float(v["wait"]), w, 0.0001, "空手点客人不扣耐心")
+
+
+func test_wrong_item_twice_and_he_leaves() -> void:
+	var ss := _session()
+	var t := _table(ss, [RED, BLUE])
+	var c := _customer(ss.s)
+	var v := _visitor(ss, c, t.stack.items[0].id)
+	_deal(ss, v)
+	var hand := ss.s.inventory.hand()
+	ss.api.take_top_to_hand(t.id)   # 蓝的
+	var w := float(v["wait"])
+	var r0: float = v["ctx"].rapport
+	assert_eq(ss.deliver(v, hand)["result"], "wrong")
+	assert_eq(hand.stack.height(), 1, "递错的货留在手上")
+	assert_true(float(v["wait"]) < w, "等待时间扣一截")
+	assert_true(v["ctx"].rapport < r0, "递错好感下降")
+	assert_eq(ss.deliver(v, hand)["result"], "wrong_left")
+	assert_eq(v["state"], "left")
+	assert_eq(int(ss.s.period_stats["undelivered"]), 1)
+
+
+func test_timeout_counts_lost_deal_and_hurts_regular() -> void:
+	var ss := _session()
+	var t := _table(ss, [RED])
+	var c := _customer(ss.s)
+	ss.s.customers.record_purchase(c, 10.0, 10.0)   # 已是常客
+	var p0: float = ss.s.customers.return_probability[c.id]
+	var v := _visitor(ss, c, t.stack.items[0].id)
+	_deal(ss, v)
+	ss.tick(float(v["wait"]) + 1.0)
+	assert_eq(v["state"], "left")
+	assert_eq(int(ss.s.period_stats["undelivered"]), 1)
+	assert_true(float(ss.s.customers.return_probability[c.id]) < p0, "常客没拿到货回购率下降")
+
+
+func test_several_customers_wait_at_once() -> void:
+	var ss := _session()
+	var t := _table(ss, [RED, RED, RED])
+	var a := _visitor(ss, _customer(ss.s), t.stack.items[0].id)
+	var b := _visitor(ss, _customer(ss.s), t.stack.items[1].id)
+	_deal(ss, a)
+	_deal(ss, b)
+	assert_eq(a["state"], "waiting_item")
+	assert_eq(b["state"], "waiting_item")
+	assert_true(a["want"][0]["item_id"] != b["want"][0]["item_id"], "别人等着的那份不会再被挑")
+
+
+func test_reserve_drifts_with_visit_context() -> void:
+	var s := GameState.new_game(1)
+	var kind := _customer(s, 1.0, "tug_of_war")
+	kind.visits = 6
+	var ctx := VisitContext.create(kind)
+	ctx.set_budget_from(kind, RED)
+	ctx.basket_count = 1
+	ctx.rapport = 1.0
+	var base := HaggleState.reserve_for(kind, RED)
+	assert_true(HaggleState.reserve_for(kind, RED, {}, ctx) > base, "熟了好说话：给个好价")
+	var tough := _customer(s, 0.0, "direct_discount")
+	var ctx2 := VisitContext.create(tough)
+	ctx2.set_budget_from(tough, RED)
+	ctx2.basket_count = 2
+	var base2 := HaggleState.reserve_for(tough, RED)
+	assert_true(HaggleState.reserve_for(tough, RED, {}, ctx2) < base2, "爱砍价：买多要优惠")
+	var h := HaggleState.start(tough, RED, 100.0, {}, ctx2)
+	assert_true(h.last_line.contains("便宜点"), h.last_line)
+	# 预算花得差不多了，心理价被剩余预算封顶
+	ctx2.spent = ctx2.budget - 1.0
+	assert_true(HaggleState.reserve_for(tough, RED, {}, ctx2) <= 1.0 + 0.0001)
+	assert_true(ctx2.continue_p(tough) < 0.05)
+
+
+func test_bundle_sells_two_for_one_total() -> void:
+	var ss := _session()
+	var t := _table(ss, [RED, RED, BLUE])
+	var c := _customer(ss.s)
+	var v := _visitor(ss, c, t.stack.items[0].id)
+	v["ctx"].basket_count = 1
+	var h := ss.start_haggle(v)
+	assert_true(h.bundle_available(), "买过一件后可以一起买")
+	h.offer_bundle(1.0, ss.s.rng)   # 远低于客人出价，必成
+	assert_eq(h.result, "deal")
+	ss.finish(v, h)
+	assert_eq(v["want"].size(), 2)
+	var hand := ss.s.inventory.hand()
+	for w in v["want"]:
+		var loc := ss.locate(w["item_id"])
+		ss.api.place_on_top(ss.api.pull_item(loc["slot_id"], loc["index"])["item"], hand.id)
+	var d := ss.deliver(v, hand)
+	assert_eq(d["count"], 2)
+	assert_near(float(d["paid"]), 1.0, 0.0001, "两条按总价收")
+
+
+func test_bundle_failure_costs_more_patience() -> void:
+	var ss := _session()
+	var t := _table(ss, [RED, RED])
+	var v := _visitor(ss, _customer(ss.s), t.stack.items[0].id)
+	v["ctx"].basket_count = 1
+	var h := ss.start_haggle(v)
+	var single := HaggleState.start(v["customer"], RED, h.asking_price, {}, v["ctx"])
+	var p0 := h.patience_left
+	h.offer_bundle(99999.0, ss.s.rng)
+	single.offer_price(99999.0, ss.s.rng)
+	assert_true(p0 - h.patience_left > p0 - single.patience_left)
+
+
+func test_sold_out_detection() -> void:
+	var ss := _session()
+	for b in ss.s.inventory.slots_of_type("Bag"):
+		b.stack.items.clear()
+	assert_true(ss.sold_out(), "什么都没有、没人等货 → 卖光")
+	var t := _table(ss, [RED])
+	assert_true(not ss.sold_out())
+	var v := _visitor(ss, _customer(ss.s), t.stack.items[0].id)
+	_deal(ss, v)
+	var hand := ss.s.inventory.hand()
+	ss.api.take_top_to_hand(t.id)
+	assert_true(not ss.sold_out(), "货在手上还没交")
+	ss.deliver(v, hand)
+	assert_true(ss.sold_out())
+	# 摊上空了但行囊还有：不算卖光
+	ss.api.place_on_top(ss.s.inventory.create_item(RED), ss.s.inventory.slots_of_type("Bag")[0].id)
+	assert_true(ss.table_empty() and not ss.sold_out())
