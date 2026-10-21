@@ -253,8 +253,40 @@ def ground_tile(kind, variant, rng):
         "road": [(92, 90, 101), (84, 82, 93), (102, 100, 112), (70, 68, 78)],
         "grass": [(66, 94, 60), (78, 110, 68), (56, 82, 52), (48, 70, 46)],
         "lot": [(60, 63, 53), (53, 56, 47), (68, 71, 60), (46, 49, 41)],
+        "concrete": [(118, 117, 112), (108, 107, 102), (128, 127, 121), (96, 95, 90)],
+        "wood": [(178, 140, 98), (156, 118, 78), (196, 160, 118), (112, 80, 52)],
+        "tile": [(190, 184, 172), (176, 170, 158), (204, 198, 186), (140, 134, 124)],
     }[kind]
     slab_tone = {(a, b): rng.uniform(-0.04, 0.04) for a in range(2) for b in range(2)}
+    # 水泥地：一格一块大板带伸缩缝；花色 1 多一块两层的淡污渍和一道带分叉的裂缝
+    stain_in, stain_out, crack = set(), set(), set()
+    if kind == "concrete" and variant == 1:
+        cx, cy = rng.randrange(14, TW - 14), rng.randrange(7, TH - 7)
+        for dy in range(-5, 6):
+            for dx in range(-9, 10):
+                d = (dx / 9.5) ** 2 + (dy / 5.5) ** 2
+                if d < 1:
+                    (stain_in if d < 0.45 else stain_out).add((cx + dx, cy + dy))
+        x, y = rng.randrange(16, TW - 28), rng.randrange(8, TH - 8)
+        for n in range(14):
+            crack.add((x, y))
+            if n == 6:
+                bx, by = x, y
+                for _ in range(5):
+                    bx += 1
+                    by += rng.choice((-1, -1, 0))
+                    crack.add((bx, by))
+            x += 1
+            y += rng.choice((-1, 0, 0, 1))
+    # 木地板：同标清的布局（4 块板沿 gx 铺），多一条板边倒角亮线、两道木纹、板头亮边
+    planks = []
+    if kind == "wood":
+        for i in range(4):
+            planks.append({
+                "tone": rng.uniform(-0.03, 0.03),
+                "seam": 0.0 if rng.random() < 0.5 else rng.uniform(0.3, 0.7),
+                "grain": [(i / 4 + rng.uniform(0.07, 0.2), rng.uniform(0.0, 0.45), rng.uniform(0.55, 1.0)) for _ in range(2)],
+            })
     blades = set()
     if kind == "grass":
         for _ in range(26):
@@ -292,6 +324,53 @@ def ground_tile(kind, variant, rng):
                     c = (92, 128, 76)
                 if r > 0.997:
                     c = rng.choice([(222, 96, 116), (242, 222, 120), (232, 232, 242)])
+            elif kind == "concrete":
+                c = pal[2] if r < 0.02 else (pal[1] if r < 0.08 else (pal[3] if r < 0.09 else pal[0]))
+                if u < 0.035 or v < 0.035:
+                    c = pal[1]                                   # 伸缩缝
+                elif (0.035 <= u < 0.06) or (0.035 <= v < 0.06):
+                    c = shade(c, 0.04)                           # 缝边一点倒角
+                elif r >= 0.09:
+                    if (x, y) in stain_in:
+                        c = shade(pal[0], -0.07)
+                    elif (x, y) in stain_out:
+                        c = shade(pal[0], -0.04)
+                if (x, y) in crack:
+                    c = pal[3]
+                elif (x, y - 1) in crack:
+                    c = shade(c, 0.05)                           # 裂缝下沿一点亮边
+            elif kind == "tile":
+                if u < 0.035 or v < 0.035 or abs(u - 0.5) < 0.018 or abs(v - 0.5) < 0.018:
+                    c = pal[3]
+                else:
+                    c = shade(pal[0], slab_tone[(int(u * 2), int(v * 2))] * 0.5)
+                    uu, vv = u % 0.5, v % 0.5
+                    if 0.035 <= uu < 0.095 and 0.035 <= vv < 0.095:
+                        c = pal[2]                               # 左上角高光
+                    elif (0.035 <= uu < 0.06) or (0.035 <= vv < 0.06):
+                        c = shade(c, 0.04)                       # 砖边倒角
+                    elif r < 0.02:
+                        c = pal[1]
+            elif kind == "wood":
+                i = min(3, int(v * 4))
+                pk = planks[i]
+                c = shade(pal[0], pk["tone"])
+                dv = v if i == 0 else v - i / 4
+                if (v < 0.035 if i == 0 else abs(dv) < 0.018):
+                    c = pal[3]                                   # 板缝
+                elif (u < 0.035 if pk["seam"] == 0.0 else abs(u - pk["seam"]) < 0.018):
+                    c = pal[3]                                   # 板头接缝
+                elif any(abs(v - g[0]) < 0.018 and g[1] < u < g[2] for g in pk["grain"]):
+                    c = pal[1]                                   # 木纹
+                else:
+                    if 0.018 <= dv < 0.05:
+                        c = shade(c, 0.06)                       # 板边倒角亮线
+                    if pk["seam"] > 0.0 and 0.018 <= u - pk["seam"] < 0.05:
+                        c = shade(c, 0.05)                       # 板头亮边
+                    if r < 0.03:
+                        c = pal[1]
+                    elif r < 0.045:
+                        c = pal[2]
             else:
                 c = pal[1] if r < 0.1 else (pal[2] if r < 0.13 else (pal[3] if r < 0.16 else pal[0]))
                 if (x, y) in pebbles or (x - 1, y) in pebbles:
@@ -419,7 +498,7 @@ def generate(out):
     for k, img in sheets.items():
         write(img, "person_" + k if k != "hair" else "hair")
     rng = random.Random(11)
-    for kind in ["pavement", "road", "grass", "lot"]:
+    for kind in ["pavement", "road", "grass", "lot", "concrete", "wood", "tile"]:
         for v in range(2):
             write(ground_tile(kind, v, rng), "tile_%s_%d" % (kind, v))
     write(kerb_tile("nw"), "kerb_nw")
