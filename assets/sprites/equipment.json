@@ -112,6 +112,17 @@
   ],
   "H": 3
  },
+ "eq_handcart_ne": {
+  "size": [
+   28,
+   38
+  ],
+  "anchor": [
+   12,
+   24
+  ],
+  "H": 3
+ },
  "fold_sw": {
   "size": [
    13,
@@ -226,6 +237,17 @@
   ]
  },
  "eq_handcart_se": {
+  "size": [
+   28,
+   38
+  ],
+  "anchor": [
+   15,
+   24
+  ],
+  "H": 3
+ },
+ "eq_handcart_nw": {
   "size": [
    28,
    38

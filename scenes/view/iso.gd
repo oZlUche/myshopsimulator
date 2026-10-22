@@ -181,8 +181,10 @@ static func draw_bubble(ci: CanvasItem, pos: Vector2, kind: String, a := 1.0) ->
 ## phase 为走路动画相位（秒），站着传 0。k 放大倍数只取整（1 或 2），像素才整齐。
 ## style 发型（Hair 枚举，-1 按衣服发色自动挑一个）；pants 裤色（透明 = 按上衣加深）；scarf 有颜色就围一条围巾。
 ## 颜色的 alpha 会一起作用到整个人（路人淡出用）。
-static func draw_person(ci: CanvasItem, foot: Vector2, body: Color, hair: Color, facing := 1.0, phase := 0.0, back := false, k := 1.0, style := -1, pants := Color(0, 0, 0, 0), scarf := Color(0, 0, 0, 0)) -> void:
+## pose："walk" 走路 / "push" 推手推车（双手扶车把，车用 pushed_cart 另画）。
+static func draw_person(ci: CanvasItem, foot: Vector2, body: Color, hair: Color, facing := 1.0, phase := 0.0, back := false, k := 1.0, style := -1, pants := Color(0, 0, 0, 0), scarf := Color(0, 0, 0, 0), pose := "walk") -> void:
 	var px := PX * maxf(1.0, floorf(k))
+	var pre := "person_push_" if pose == "push" else "person_"
 	var a := body.a
 	draw_shadow(ci, foot, 8.0 * px, 3.0 * px, 0.3 * a)
 	var dir := (2 if back else 0) + (1 if facing < 0.0 else 0)
@@ -202,16 +204,39 @@ static func draw_person(ci: CanvasItem, foot: Vector2, body: Color, hair: Color,
 	var skin := SKIN
 	skin.a = a
 	hair.a = a
-	ci.draw_texture_rect_region(sprite_tex("person_outline"), dst, hsrc, white)
-	ci.draw_texture_rect_region(sprite_tex("person_skin"), dst, src, skin)
-	ci.draw_texture_rect_region(sprite_tex("person_top"), dst, src, body)
-	ci.draw_texture_rect_region(sprite_tex("person_bottom"), dst, src, pants)
-	ci.draw_texture_rect_region(sprite_tex("person_shoes"), dst, src, white)
+	ci.draw_texture_rect_region(sprite_tex(pre + "outline"), dst, hsrc, white)
+	ci.draw_texture_rect_region(sprite_tex(pre + "skin"), dst, src, skin)
+	ci.draw_texture_rect_region(sprite_tex(pre + "top"), dst, src, body)
+	ci.draw_texture_rect_region(sprite_tex(pre + "bottom"), dst, src, pants)
+	ci.draw_texture_rect_region(sprite_tex(pre + "shoes"), dst, src, white)
 	ci.draw_texture_rect_region(sprite_tex("hair"), dst, hsrc, hair)
-	ci.draw_texture_rect_region(sprite_tex("person_face"), dst, src, white)
+	ci.draw_texture_rect_region(sprite_tex(pre + "face"), dst, src, white)
 	if scarf.a > 0.0:
 		scarf.a *= a
-		ci.draw_texture_rect_region(sprite_tex("person_scarf"), dst, src, scarf)
+		ci.draw_texture_rect_region(sprite_tex(pre + "scarf"), dst, src, scarf)
+
+
+## 推着的手推车该画在哪：foot_g 是人脚下的格坐标（可以带小数），facing / back 同 draw_person。
+## 返回 {g: 车占地的格坐标（给 draw_equipment / draw_sprite 用）, facing: 车的朝向名（"sw"/"se"/"ne"/"nw"）,
+##       near: 车比人更靠镜头（true 就在画完人之后画，false 先画车再画人）, depth: 车用来排序的深度}。
+## 车把那一头紧挨着人的手；往 +gx / +gy 推时车在镜头这边，往 -gx / -gy 推时车在人身后（屏幕上方）。
+static func pushed_cart(foot_g: Vector2, facing := 1.0, back := false) -> Dictionary:
+	var g: Vector2
+	var f: String
+	if not back and facing >= 0.0:
+		g = foot_g + Vector2(0.9, -0.35)
+		f = "sw"
+	elif not back:
+		g = foot_g + Vector2(-0.35, 0.9)
+		f = "se"
+	elif facing >= 0.0:
+		g = foot_g + Vector2(-0.35, -1.8)
+		f = "nw"
+	else:
+		g = foot_g + Vector2(-1.8, -0.35)
+		f = "ne"
+	var c := g + (Vector2(0.45, 0.35) if f in ["sw", "ne"] else Vector2(0.35, 0.45))
+	return {"g": g, "facing": f, "near": not back, "depth": c.x + c.y}
 
 
 ## 人物在屏幕上占的范围（点击判定用）：脚底在 foot。

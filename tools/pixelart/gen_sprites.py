@@ -183,8 +183,9 @@ def hair_back(style):
     return h
 
 
-def body_frame(frame, back):
-    """除头发外的所有层。frame 0/2 站着，1 迈左脚，3 迈右脚。朝右（+x）。"""
+def body_frame(frame, back, pose="walk"):
+    """除头发外的所有层。frame 0/2 站着，1 迈左脚，3 迈右脚。朝右（+x）。
+    pose="walk" 手臂随步伐摆；"push" 推手推车：双臂伸向身前握车把（车另画，见 Iso.pushed_cart），腿照常走。"""
     L = {k: Layer() for k in ["skin", "top", "bottom", "shoes", "face", "scarf"]}
     bob = -1 if frame in (1, 3) else 0
     # 头
@@ -208,14 +209,26 @@ def body_frame(frame, back):
         L["top"].rect(11, 16 + bob, 12, 16 + bob, DEEP)
     else:
         L["top"].rect(11, 15 + bob, 12, 16 + bob, SHADE)
-    # 手臂随步伐前后摆：迈左脚时右臂往前（画低一格）
-    swing = 1 if frame == 1 else (-1 if frame == 3 else 0)
-    la, ra = 15 + bob - swing, 15 + bob + swing
-    L["top"].rect(5, la, 6, la + 6, 235)
-    L["top"].rect(17, ra, 18, ra + 6, 170)
+    if pose == "push" and not back:
+        # 推车（正面）：两条手臂都伸向身前（+x）握车把——远臂的前臂从胸前横过去，近臂从肩膀下来再往前；手在最右边
+        L["top"].rect(11, 17 + bob, 20, 18 + bob, 235)     # 远臂前臂
+        L["skin"].rect(21, 17 + bob, 22, 18 + bob, LIT)     # 远手
+        L["top"].rect(17, 15 + bob, 18, 19 + bob, 170)     # 近臂上臂
+        L["top"].rect(17, 20 + bob, 18, 21 + bob, 170)     # 近臂前臂
+        L["skin"].rect(19, 20 + bob, 20, 21 + bob, 215)     # 近手
+    elif pose == "push":
+        # 推车（背面）：上臂往前收，前臂和手被身体挡住，肩外只露一小截
+        L["top"].rect(5, 15 + bob, 6, 18 + bob, 235)
+        L["top"].rect(17, 15 + bob, 18, 18 + bob, 170)
+    else:
+        # 手臂随步伐前后摆：迈左脚时右臂往前（画低一格）
+        swing = 1 if frame == 1 else (-1 if frame == 3 else 0)
+        la, ra = 15 + bob - swing, 15 + bob + swing
+        L["top"].rect(5, la, 6, la + 6, 235)
+        L["top"].rect(17, ra, 18, ra + 6, 170)
+        L["skin"].rect(5, la + 7, 6, la + 7, LIT)
+        L["skin"].rect(17, ra + 7, 18, ra + 7, 215)
     L["top"].rect(7, 22 + bob, 16, 22 + bob, DEEP)   # 腰线
-    L["skin"].rect(5, la + 7, 6, la + 7, LIT)
-    L["skin"].rect(17, ra + 7, 18, ra + 7, 215)
     # 裤子与鞋：站着两条腿平放；迈步时一条腿抬起缩短，另一条往朝向那边跨
     if frame in (0, 2):
         L["bottom"].rect(8, 23, 10, 27, LIT)
@@ -263,8 +276,9 @@ FIXED = {
 }
 
 
-def build_person():
-    """返回 {层名: Image}。可换色层是 LA，固定色层是 RGBA。outline 和 hair 一样按发型纵向叠（轮廓随发型变）。"""
+def build_person(pose="walk"):
+    """返回 {层名: Image}。可换色层是 LA，固定色层是 RGBA。outline 和 hair 一样按发型纵向叠（轮廓随发型变）。
+    pose="push" 出推车姿态的一套（头发和 walk 共用，只是轮廓不同）。"""
     tint_layers = ["skin", "top", "bottom", "scarf"]
     sheets = {k: Image.new("LA", (FW * FRAMES, FH * DIRS), (0, 0)) for k in tint_layers}
     sheets["face"] = Image.new("RGBA", (FW * FRAMES, FH * DIRS), (0, 0, 0, 0))
@@ -275,7 +289,7 @@ def build_person():
         back = d >= 2
         mirror = d in (1, 3)
         for f in range(FRAMES):
-            L, bob = body_frame(f, back)
+            L, bob = body_frame(f, back, pose)
             hairs = {s: (hair_back(s) if back else hair_front(s)).shift(0, bob) for s in HAIR_STYLES}
             outlines = {s: outline_of(list(L.values()) + [hairs[s]]) for s in HAIR_STYLES}
             if mirror:
@@ -511,6 +525,10 @@ def generate():
     sheets = build_person()
     for k, img in sheets.items():
         write(img, "person_" + k if k != "hair" else "hair")
+    # 推车姿态：person_push_*，头发共用 hair.png
+    for k, img in build_person("push").items():
+        if k != "hair":
+            write(img, "person_push_" + k)
     rng = random.Random(7)
     for kind in ["pavement", "road", "grass", "lot", "concrete", "wood", "tile"]:
         for v in range(2):

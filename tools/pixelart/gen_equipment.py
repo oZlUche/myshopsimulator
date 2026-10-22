@@ -492,9 +492,11 @@ def bag(S=1):
 
 
 def handcart(front, S=1):
-    """手推车：一块矮板、两个轮子、后面一根扶手。front 是扶手在哪一头：'sw' 扶手在 gx 小的那头。"""
+    """手推车：一块矮板、两个轮子、一头一根扶手。front 是扶手在哪一头（也就是推车人站的那头，车往反方向走）：
+    'sw' 扶手在 gx 小的那头（往 +gx 推）、'se' 在 gy 小的那头（往 +gy 推）、
+    'ne' 在 gx 大的那头（往 -gx 推，扶手朝镜头）、'nw' 在 gy 大的那头（往 -gy 推，扶手朝镜头）。"""
     H = 3
-    w, d = (0.9, 0.7) if front == "sw" else (0.7, 0.9)
+    w, d = (0.9, 0.7) if front in ("sw", "ne") else (0.7, 0.9)
     b = IsoBox(H, w, d, S=S).fill((80, 100, 130, 255), top=(110, 130, 160, 255))
     pad = 20 * S
     img = Image.new("RGBA", (b.W + 2 * S, b.img.size[1] + pad + 2 * S), (0, 0, 0, 0))
@@ -507,10 +509,9 @@ def handcart(front, S=1):
                 if abs(dx) + abs(dy - r) <= 2 * r:
                     img.putpixel((x + dx, y + dy), (40, 40, 46, 255) if not (S >= 2 and dx == 0 and dy == r) else (90, 90, 96, 255))
     # 扶手：从后面两个角立起来，顶上一根横杆
-    if front == "sw":
-        posts = [(S + b.lx, pad + S + b._yg[b.lx]), (S + b.ox, pad + S)]
-    else:
-        posts = [(S + b.rx, pad + S + b._yg[b.rx]), (S + b.ox, pad + S)]
+    corner = {"l": (S + b.lx, pad + S + b._yg[b.lx]), "r": (S + b.rx, pad + S + b._yg[b.rx]),
+              "o": (S + b.ox, pad + S), "b": (S + b.bx, pad + S + b._yg[b.bx])}
+    posts = [corner[c] for c in {"sw": "lo", "se": "ro", "ne": "rb", "nw": "lb"}[front]]
     BAR = (60, 64, 72, 255)
     for (x, y) in posts:
         for yy in range(y - 18 * S, y):
@@ -566,6 +567,8 @@ def generate(out, S=1):
                 save("eq_%s_glass_%s" % (kind, front), extra["overlay"], b.anchor(), b.H)
         cart, anchor = handcart(front, S)
         save("eq_handcart_%s" % front, cart, anchor, 3 * S)
+        cart, anchor = handcart({"sw": "ne", "se": "nw"}[front], S)
+        save("eq_handcart_%s" % {"sw": "ne", "se": "nw"}[front], cart, anchor, 3 * S)
         f = scarf_fold_slanted(front, S)
         save("fold_%s" % front, f.img, [f.ox, f.H], f.H)
     img, scarf, anchor = mannequin(S)

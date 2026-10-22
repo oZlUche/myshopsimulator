@@ -53,6 +53,21 @@ class Showcase extends Control:
 		things.append({"g": Vector2(4.3, 5), "f": func(): Iso.draw_equipment(self, o, Vector2(4.3, 5), "bag")})
 		things.append({"g": Vector2(5, 6), "f": func(): Iso.draw_equipment(self, o, Vector2(5, 6), "handcart", "sw")})
 		things.append({"g": Vector2(7, 6), "f": func(): Iso.draw_equipment(self, o, Vector2(7, 6), "handcart", "se")})
+		things.append({"g": Vector2(2.2, 5.4), "f": func(): Iso.draw_equipment(self, o, Vector2(2.2, 5.4), "handcart", "ne")})
+		things.append({"g": Vector2(3.4, 5.3), "f": func(): Iso.draw_equipment(self, o, Vector2(3.4, 5.3), "handcart", "nw")})
+		# 推车姿态：四个方向各一人，车按 Iso.pushed_cart 摆在身前（往镜头推的车在人后画，往里推的先画）
+		var pushes := [[Vector2(8.5, 6.0), 1.0, false], [Vector2(10.6, 4.6), -1.0, false], [Vector2(8.9, 8.6), 1.0, true], [Vector2(11.9, 8.6), -1.0, true]]
+		for pi in pushes.size():
+			var foot: Vector2 = pushes[pi][0]
+			var pf: float = pushes[pi][1]
+			var pb: bool = pushes[pi][2]
+			var fit := Iso.outfit_full(pi * 97 + 3)
+			var cart := Iso.pushed_cart(foot, pf, pb)
+			things.append({"g": foot, "f": func(): Iso.draw_person(self, Iso.to_screen(foot, o), fit["top"], fit["hair"], pf, 0.2 * pi, pb, 1.0, pi % Iso.HAIR_STYLES, fit["pants"], fit["scarf"], "push")})
+			things.append({"g": foot + Vector2(0.001, 0.0) * (1.0 if cart["near"] else -1.0), "d": cart["depth"], "f": func():
+				Iso.draw_equipment(self, o, cart["g"], "handcart", cart["facing"])
+				var z := float(Iso.sprite_meta("eq_handcart_" + cart["facing"]).get("H", 3))
+				Iso.draw_sprite(self, o, cart["g"] + Vector2(0.25, 0.3), "eq_carton_small_sw" if pi % 2 == 0 else "eq_bag", Color.WHITE, z)})
 		things.append({"g": Vector2(8, 4), "f": func(): Iso.draw_stall_table(self, o, Vector2(7.2, 4), 2.4, 0.7, 14.0)})
 		for j in 3:
 			var cell := Vector2(7.2 + 2.4 * (j + 0.5) / 3, 4.38)
@@ -78,7 +93,7 @@ class Showcase extends Control:
 			Iso.draw_bubble(self, p + Vector2(14, -76), "ask")
 			Iso.draw_bubble(self, p + Vector2(-38, -76), "haggle")
 			Iso.draw_bubble(self, p + Vector2(14, -100), "wait")})
-		things.sort_custom(func(a, b): return Iso.depth(a["g"]) < Iso.depth(b["g"]))
+		things.sort_custom(func(a, b): return a.get("d", Iso.depth(a["g"])) < b.get("d", Iso.depth(b["g"])))
 		for th in things:
 			th["f"].call()
 		draw_string(get_theme_default_font(), Vector2(12, 24), "美术陈列室（%s）：地面 / 设备 / 人物 4 向 × 4 帧 / 气泡" % Iso.tier, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color.WHITE)

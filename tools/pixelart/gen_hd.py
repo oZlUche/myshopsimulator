@@ -38,8 +38,8 @@ def head_circle(bob):
     return m
 
 
-def refine_body(L, frame, back):
-    """在放大两倍的标清图层上补高清细节。L 是 {层名: Layer}（已放大）。"""
+def refine_body(L, frame, back, pose="walk"):
+    """在放大两倍的标清图层上补高清细节。L 是 {层名: Layer}（已放大）。pose 同 sd.body_frame。"""
     bob = -S if frame in (1, 3) else 0
     head_sd = sd.head_mask().upscale(S).shift(0, bob)
     head_hd = head_circle(bob)
@@ -83,6 +83,8 @@ def refine_body(L, frame, back):
         for x in range(14, 34):
             if (x, y) not in top:
                 continue
+            if pose == "push" and top.px[(x, y)] == 235:
+                continue                                   # 横过胸前的远臂不按躯干重涂
             v = 240
             if x <= 15:
                 v = 255
@@ -101,14 +103,20 @@ def refine_body(L, frame, back):
         for y in range(t0, t0 + 3):
             for x in range(22, 26):
                 top.put(x, y, SHADE)
-    swing = S if frame == 1 else (-S if frame == 3 else 0)
-    la, ra = t0 - swing, t0 + swing
-    for y in range(la + 12, la + 14):
-        for x in range(10, 14):
-            top.put(x, y, 205)
-    for y in range(ra + 12, ra + 14):
-        for x in range(34, 38):
-            top.put(x, y, 150)
+    if pose == "push":
+        # 推车：两条前臂的下沿各压一行暗色，像有点厚度
+        for (x, y), v in list(top.px.items()):
+            if v in (235, 170) and y >= t0 and top.px.get((x, y + 1)) != v and (x, y + 1) not in top:
+                top.put(x, y, 205 if v == 235 else 150)
+    else:
+        swing = S if frame == 1 else (-S if frame == 3 else 0)
+        la, ra = t0 - swing, t0 + swing
+        for y in range(la + 12, la + 14):
+            for x in range(10, 14):
+                top.put(x, y, 205)
+        for y in range(ra + 12, ra + 14):
+            for x in range(34, 38):
+                top.put(x, y, 150)
     L["top"] = top
     # 裤子：外侧一条亮线、内侧一条暗线
     bottom = Layer(FW, FH)
@@ -188,7 +196,7 @@ def refine_hair(h, style, back, bob):
     return out
 
 
-def build_person():
+def build_person(pose="walk"):
     sheets = {k: Image.new("LA", (FW * FRAMES, FH * DIRS), (0, 0)) for k in ["skin", "top", "bottom", "scarf"]}
     sheets["face"] = Image.new("RGBA", (FW * FRAMES, FH * DIRS), (0, 0, 0, 0))
     sheets["shoes"] = Image.new("RGBA", (FW * FRAMES, FH * DIRS), (0, 0, 0, 0))
@@ -198,9 +206,9 @@ def build_person():
         back = d >= 2
         mirror = d in (1, 3)
         for f in range(FRAMES):
-            L0, bob = sd.body_frame(f, back)
+            L0, bob = sd.body_frame(f, back, pose)
             L = {k: v.upscale(S) for k, v in L0.items()}
-            L = refine_body(L, f, back)
+            L = refine_body(L, f, back, pose)
             hairs = {}
             for s in HAIR_STYLES:
                 h0 = (sd.hair_back(s) if back else sd.hair_front(s)).shift(0, bob).upscale(S)
@@ -498,6 +506,9 @@ def generate(out):
     sheets = build_person()
     for k, img in sheets.items():
         write(img, "person_" + k if k != "hair" else "hair")
+    for k, img in build_person("push").items():
+        if k != "hair":
+            write(img, "person_push_" + k)
     rng = random.Random(11)
     for kind in ["pavement", "road", "grass", "lot", "concrete", "wood", "tile"]:
         for v in range(2):
