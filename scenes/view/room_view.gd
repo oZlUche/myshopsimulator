@@ -221,7 +221,7 @@ func _draw() -> void:
 	if cart_g.x > -50.0:
 		things.append({"d": cart_g.x + cart_g.y, "kind": "cart"})
 	_collect_people(things)
-	things.sort_custom(func(a, b): return a["d"] < b["d"])
+	things.sort_custom(_draw_before)
 	for t in things:
 		match t["kind"]:
 			"equip":
@@ -234,6 +234,14 @@ func _draw() -> void:
 				_draw_cart(o)
 	_draw_overlay(o)
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+
+## 画家算法的先后：远的先画。远近一样时人在后画：人站在设备 / 箱堆斜对角那格（左前或右前）时，
+## 他挡着的正好是设备朝外的那一面，应该画在设备前面；排序不稳定的话会时前时后。
+static func _draw_before(a: Dictionary, b: Dictionary) -> bool:
+	if not is_equal_approx(float(a["d"]), float(b["d"])):
+		return float(a["d"]) < float(b["d"])
+	return a["kind"] != "person" and b["kind"] == "person"
 
 
 func _draw_walls(o: Vector2, sz: Vector2i) -> void:
