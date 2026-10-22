@@ -25,6 +25,8 @@ var floor_kind := "wood"
 ## 玩家站的位置（格坐标，可以是小数，走路时插值）
 var player_g := Vector2(0, 0)
 var _player_path: Array[Vector2] = []
+## 走路动画的速度倍率（抱箱走得慢，由 RoomOps.walk_to 按 ActionAPI.walk_speed_mult 设）
+var walk_mult := 1.0
 var _player_dir := Vector2(1, 0)
 var _player_phase := 0.0
 ## 手推车停在哪（格坐标的脚下点）；x < -50 表示不画
@@ -171,7 +173,7 @@ func player_walking() -> bool:
 
 
 func step(dt: float) -> void:
-	var left := dt * 4.0
+	var left := dt * 4.0 * walk_mult
 	while left > 0.0 and not _player_path.is_empty():
 		var to := _player_path[0] - player_g
 		if to.length() <= left:
@@ -416,10 +418,13 @@ func _draw_person_thing(o: Vector2, t: Dictionary) -> void:
 	if not c.is_empty():
 		var at := foot + Vector2(-9, -34)
 		if c["box"]:
-			draw_rect(Rect2(at + Vector2(-2, -6), Vector2(22, 16)), c["color"])
-			draw_rect(Rect2(at + Vector2(-2, -6), Vector2(22, 16)), Iso.OUTLINE, false, 1.0)
+			# 【搬运】Lv6 能抱两箱，摞着画
+			for i in mini(int(c["n"]), 2):
+				var r := Rect2(at + Vector2(-2, -6 - i * 13), Vector2(22, 16))
+				draw_rect(r, c["color"])
+				draw_rect(r, Iso.OUTLINE, false, 1.0)
 		else:
-			for i in mini(int(c["n"]), 3):
+			for i in mini(int(c["n"]), 6):
 				draw_rect(Rect2(at + Vector2(0, 4 - i * 5), Vector2(18, 4)), c["color"].lerp(Color.WHITE, 0.2 * i))
 	if t.get("tag", "") != "":
 		draw_string(get_theme_default_font(), foot + Vector2(-30, 16), t["tag"], HORIZONTAL_ALIGNMENT_CENTER, 60, 12, t.get("tag_color", UIKit.TEXT))

@@ -32,6 +32,23 @@ func _touch(slot: Slot) -> void:
 	s.knowledge.touch_slot(slot, SkillSystem.memory_slots(s.player), s.clock.period)
 
 
+## 拆顶、放顶、抱起 / 放下箱包的耗时（【搬运】Lv2 ×0.8，02 §2.10）。
+func handle_seconds(base: float) -> float:
+	return base * float(SkillSystem.carry_mods(s.player)["handle_time_mult"])
+
+
+## 走路速度倍率（07 §2）：抱着箱子 ×0.6（【搬运】Lv4 ×0.75），抱两箱 ×0.5；空手、拿散货、拿包不变。
+func walk_speed_mult() -> float:
+	var h := s.inventory.hand()
+	var boxes := 0
+	for p in h.packages:
+		if p.is_box():
+			boxes += 1
+	if boxes >= 2:
+		return 0.5
+	return float(SkillSystem.carry_mods(s.player)["box_walk_mult"]) if boxes == 1 else 1.0
+
+
 func _xp(amount: float) -> void:
 	s.player.xp_pool += amount
 	s.period_stats["xp_earned"] = float(s.period_stats.get("xp_earned", 0.0)) + amount
@@ -162,7 +179,7 @@ func take_top(slot_id: String, _actor: String = "player") -> ScarfItem:
 	return pull_item(slot_id, sl.stack.height() - 1, {"resolved": true})["item"]
 
 
-## 从一个堆顶拿一份到手上；手上满了返回 null。
+## 从一个堆顶拿一份到手上；手上满了返回 null。散货上限看【搬运】（02 §2.10）。
 func take_top_to_hand(slot_id: String) -> ScarfItem:
 	var h := s.inventory.hand()
 	if h.stack.is_full() or slot_id == h.id or not h.packages.is_empty():
@@ -289,7 +306,7 @@ const LABEL_SECONDS := 2.0
 const MOVE_PACKAGE_SECONDS := 2.0
 
 
-## 把某格最上面那个箱 / 包抱到手上。手上得没拿着散货，而且抱得下（1 箱或 3 包）。返回 {ok, reason, package}。
+## 把某格最上面那个箱 / 包抱到手上。手上得没拿着散货，而且抱得下（箱、包不混拿，各按【搬运】的上限）。返回 {ok, reason, package}。
 func take_package(slot_id: String) -> Dictionary:
 	var sl := _slot(slot_id)
 	var h := s.inventory.hand()
@@ -299,7 +316,7 @@ func take_package(slot_id: String) -> Dictionary:
 		return {"ok": false, "reason": "手上拿着散货，先放下"}
 	var p: Package = sl.packages[-1]
 	if not h.can_hold(p):
-		return {"ok": false, "reason": "抱不下了，一次只能抱 1 箱或 3 包"}
+		return {"ok": false, "reason": "抱不下了，一次只能抱 %d 箱或 %d 包，不能混着抱" % [h.kind_limits["box"], h.kind_limits["pack"]]}
 	sl.packages.pop_back()
 	h.packages.append(p)
 	return {"ok": true, "package": p}
