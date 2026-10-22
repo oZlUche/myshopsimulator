@@ -64,8 +64,11 @@ func walk_to(c: Vector2i, onto := false) -> bool:
 		say.call("[color=#e05a4f]走不过去，路被挡住了。[/color]")
 		return false
 	if p.size() > 1:
+		# 抱着箱子走得慢（07 §2，【搬运】Lv4 起快一些）
+		var mult := api.walk_speed_mult()
+		view.walk_mult = mult
 		view.follow_path(p)
-		spend.call(RoomGrid.STEP_SECONDS * (p.size() - 1))
+		spend.call(RoomGrid.STEP_SECONDS * (p.size() - 1) / mult)
 	player_cell = p[-1]
 	return true
 
@@ -111,9 +114,9 @@ func carry(box: HBoxContainer) -> void:
 	UIKit.clear(box)
 	var h := inv().hand()
 	if not h.packages.is_empty():
-		box.add_child(view_for(h, "手上（1 箱 / 3 包）"))
+		box.add_child(view_for(h, "手上（%d 箱 / %d 包）" % [h.kind_limits["box"], h.kind_limits["pack"]]))
 	else:
-		box.add_child(view_for(h, "手上（%d 份）" % Inventory.HAND_MAX))
+		box.add_child(view_for(h, "手上（%d 份）" % h.stack.max_height))
 	var c := cart()
 	if c != null:
 		var pv := PackageView.new().setup(c, "手推车（2 箱）")
@@ -201,7 +204,7 @@ func take(slot_id: String) -> void:
 	if not r["ok"]:
 		say.call(r["reason"] + "。")
 		return
-	spend.call(ActionAPI.MOVE_PACKAGE_SECONDS)
+	spend.call(api.handle_seconds(ActionAPI.MOVE_PACKAGE_SECONDS))
 
 
 func open_box(slot_id: String) -> void:
@@ -234,7 +237,7 @@ func pack_from_box(slot_id: String) -> void:
 	if not r["ok"]:
 		say.call(r["reason"] + "。")
 		return
-	spend.call(ActionAPI.MOVE_PACKAGE_SECONDS * 0.5)
+	spend.call(api.handle_seconds(ActionAPI.MOVE_PACKAGE_SECONDS * 0.5))
 
 
 func pack_into_box(slot_id: String) -> void:
@@ -242,7 +245,7 @@ func pack_into_box(slot_id: String) -> void:
 	if not r["ok"]:
 		say.call(r["reason"] + "。")
 		return
-	spend.call(ActionAPI.MOVE_PACKAGE_SECONDS * 0.5)
+	spend.call(api.handle_seconds(ActionAPI.MOVE_PACKAGE_SECONDS * 0.5))
 
 
 func look_at_pack(slot_id: String) -> void:
@@ -268,7 +271,7 @@ func item_from_pack(slot_id: String) -> void:
 		say.call("手上抱着箱包，先放下。")
 		return
 	if api.take_from_open_pack(slot_id) != null:
-		spend.call(ActionAPI.TAKE_TOP_SECONDS)
+		spend.call(api.handle_seconds(ActionAPI.TAKE_TOP_SECONDS))
 
 
 func label_dialog(p: Package) -> void:
@@ -307,7 +310,7 @@ func put_from_hand(slot_id: String) -> bool:
 	if sl.can_hold(p) or (sl.type == "Floor" and p.is_box()):
 		var r := api.put_package(slot_id)
 		if r["ok"]:
-			spend.call(ActionAPI.MOVE_PACKAGE_SECONDS)
+			spend.call(api.handle_seconds(ActionAPI.MOVE_PACKAGE_SECONDS))
 		else:
 			say.call(r["reason"] + "。")
 	elif not p.is_box() and top_box_open:

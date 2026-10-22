@@ -18,6 +18,9 @@ var stack := ItemStack.new()
 var packages: Array[Package] = []
 ## 能放多少整箱整包（按 Package.UNITS 计，箱 3、包 1）；0 = 不放整包
 var pkg_capacity: int = 0
+## 手上按形态各自限数 {box: n, pack: n}，箱和包不混拿（03 §4、02 §2.10）；空 = 按 pkg_capacity 的单位算。
+## 不存档，Inventory.hand() 每次按【搬运】重设。
+var kind_limits: Dictionary = {}
 
 
 func package_units() -> int:
@@ -33,8 +36,14 @@ func top_package() -> Package:
 
 ## 这个包 / 箱能不能放上来：容量够，而且这里没有散货。
 func can_hold(p: Package) -> bool:
-	return pkg_capacity > 0 and stack.height() == 0 and stack.collapsed_pile.is_empty() \
-		and package_units() + p.units() <= pkg_capacity
+	if pkg_capacity <= 0 or stack.height() > 0 or not stack.collapsed_pile.is_empty():
+		return false
+	if not kind_limits.is_empty():
+		for q in packages:
+			if q.kind != p.kind:
+				return false
+		return packages.size() < int(kind_limits.get(p.kind, 0))
+	return package_units() + p.units() <= pkg_capacity
 
 
 func to_dict() -> Dictionary:

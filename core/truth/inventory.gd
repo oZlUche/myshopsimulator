@@ -8,6 +8,8 @@ var locations: Dictionary = {}
 var slots: Dictionary = {}
 ## {equipment_instance_id: {def_id, location_id, slot_ids, pos?: [gx, gy]}}
 var equipment: Dictionary = {}
+## 手的主人：手上能拿多少看他的【搬运】（02 §2.10）。GameState 负责连上，不存档；没连上按 0 级算。
+var player: PlayerState
 var _next_item := 1
 var _next_slot := 1
 var _next_equip := 1
@@ -159,21 +161,23 @@ func slots_of_type(type: String) -> Array[Slot]:
 ## 玩家手上：从堆顶拿下来、从中间抽出来的货先拿在手里，再放到某个堆顶（03 §4）。
 ## 用到时才创建，老存档里没有也没关系。
 const HAND_ID := "hand_player"
-const HAND_MAX := 3
-const HAND_PKG_UNITS := 3
 
 
+## 每次都按【搬运】重设上限（02 §2.10）：散货 hand_items 条，或 hand_boxes 箱，或 hand_packs 包，三选一。
+## 存档里存的旧上限不作数。
 func hand() -> Slot:
 	if not slots.has(HAND_ID):
 		var h := Slot.new()
 		h.id = HAND_ID
 		h.type = "Hand"
 		h.location_id = "player"
-		h.stack.max_height = HAND_MAX
 		slots[h.id] = h
-	# 手上能抱 1 箱或 3 包（07 §1），老存档里的手没有这一项
-	slots[HAND_ID].pkg_capacity = HAND_PKG_UNITS
-	return slots[HAND_ID]
+	var m := SkillSystem.carry_mods(player if player != null else PlayerState.new())
+	var hd: Slot = slots[HAND_ID]
+	hd.stack.max_height = int(m["hand_items"])
+	hd.kind_limits = {"box": int(m["hand_boxes"]), "pack": int(m["hand_packs"])}
+	hd.pkg_capacity = maxi(int(m["hand_boxes"]) * int(Package.UNITS["box"]), int(m["hand_packs"]))
+	return hd
 
 
 ## 安装设备 = 向场所注入一组槽位（01 §4.9）。返回设备实例 ID。pos 为摆放的格子（店面、仓库里用）。

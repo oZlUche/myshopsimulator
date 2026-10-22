@@ -73,6 +73,59 @@ func test_hand_carries_one_box_or_three_packs() -> void:
 	assert_true(not pile.can_hold(box))
 
 
+func test_carrying_skill_raises_hand_limits() -> void:
+	var p := PlayerState.new()
+	var m := SkillSystem.carry_mods(p)
+	assert_eq([m["hand_items"], m["hand_packs"], m["hand_boxes"]], [3, 3, 1], "0 级：3 条 / 3 包 / 1 箱")
+	assert_near(float(m["box_walk_mult"]), 0.6)
+	assert_near(float(m["cart_walk_mult"]), 0.8)
+	var expect := {1: [4, 3, 1, 1.0], 2: [4, 3, 1, 0.8], 3: [5, 4, 1, 0.8], 4: [5, 4, 1, 0.8], 5: [6, 5, 1, 0.8], 6: [6, 5, 2, 0.8]}
+	for lv in expect:
+		p.skills["carrying"] = {"level": lv, "invested": 0.0}
+		m = SkillSystem.carry_mods(p)
+		assert_eq([m["hand_items"], m["hand_packs"], m["hand_boxes"]], expect[lv].slice(0, 3), "Lv%d 上限" % lv)
+		assert_near(float(m["handle_time_mult"]), float(expect[lv][3]))
+	assert_near(float(m["box_walk_mult"]), 0.75, 0.0001, "Lv4 起抱箱 ×0.75")
+	assert_near(float(m["cart_walk_mult"]), 0.9)
+	# 摆摊阶段最多到 Lv3
+	var q := PlayerState.new()
+	q.xp_pool = 100000.0
+	for i in 10:
+		SkillSystem.invest(q, "carrying", 10000.0, {})
+	assert_eq(q.skill_level("carrying"), 3, "摆摊阶段搬运上限 3")
+
+
+func test_hand_follows_carrying_level() -> void:
+	var s := _preview()
+	var api := ActionAPI.new(s)
+	var unload := s.inventory.floor_slot(ShopSetup.WAREHOUSE, Vector2i(2, 4))
+	assert_eq(s.inventory.hand().stack.max_height, 3)
+	s.player.skills["carrying"] = {"level": 6, "invested": 0.0}
+	assert_eq(s.inventory.hand().stack.max_height, 6, "Lv5 起散货 6 条，hand() 每次按技能重设")
+	assert_near(api.handle_seconds(2.0), 1.6, 0.0001, "Lv2 起拿放 ×0.8")
+	assert_near(api.walk_speed_mult(), 1.0, 0.0001, "空手不慢")
+	assert_true(api.take_package(unload.id)["ok"])
+	assert_near(api.walk_speed_mult(), 0.75, 0.0001, "抱一箱 ×0.75（Lv4）")
+	assert_true(api.take_package(unload.id)["ok"], "Lv6 能抱第二箱")
+	assert_near(api.walk_speed_mult(), 0.5, 0.0001, "抱两箱 ×0.5")
+	assert_true(not api.take_package(unload.id)["ok"], "第三箱抱不动")
+	# 箱、包不混拿：放下两箱，拆一箱拿包，最多 5 包
+	var cell := s.inventory.floor_slot(ShopSetup.WAREHOUSE, Vector2i(4, 2))
+	assert_true(api.put_package(cell.id)["ok"])
+	assert_true(api.put_package(cell.id)["ok"])
+	assert_true(api.open_box(cell.id))
+	for i in 5:
+		assert_true(api.take_pack_from_box(cell.id)["ok"], "第 %d 包" % (i + 1))
+	assert_true(not api.take_pack_from_box(cell.id)["ok"], "Lv5 起最多 5 包")
+	assert_true(not api.take_package(unload.id)["ok"], "抱着包不能再抱箱")
+	# 存档读回来也按技能算，不认存档里的旧上限
+	var s2 := GameState.from_dict(JSON.parse_string(JSON.stringify(s.to_dict())))
+	assert_eq(s2.inventory.hand().stack.max_height, 6)
+	assert_eq(s2.inventory.hand().kind_limits, {"box": 2, "pack": 5})
+	s2.player = PlayerState.new()
+	assert_eq(s2.inventory.hand().stack.max_height, 3, "换了玩家，手跟着换")
+
+
 func test_unpack_keeps_order_and_leaves_overflow_in_pack() -> void:
 	var s := _preview()
 	var api := ActionAPI.new(s)
