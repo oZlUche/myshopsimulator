@@ -31,6 +31,7 @@ func _ready() -> void:
 	ops.player_cell = start
 	_view.place_player(start)
 	_view.cell_clicked.connect(_on_cell)
+	_view.cells_selected.connect(_on_cells)
 	_view.visitor_clicked.connect(_on_visitor_clicked)
 	if s.clock.time_of_period >= 1.0:
 		_close_shop_time()
@@ -216,6 +217,17 @@ func _on_cell(c: Vector2i) -> void:
 		_say("先把这单谈完。")
 		return
 	ops.focus_cell(c)
+	_refresh_all()
+
+
+## 地上拉框：一次抱起 / 放下几件箱包（07 §2.1）。
+func _on_cells(cells: Array) -> void:
+	if ops.layout_mode:
+		return
+	if _haggle != null:
+		_say("先把这单谈完。")
+		return
+	ops.marquee(cells)
 	_refresh_all()
 
 

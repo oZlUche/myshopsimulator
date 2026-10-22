@@ -146,6 +146,91 @@ func park_cart(quiet := false) -> bool:
 	return true
 
 
+# ---------- 地上拉框（07 §2.1） ----------
+## 在地上拉框选了一片格子：框里有箱包、手上（推车时是车）还拿得下 → 一格格走过去抱起来，拿满为止；
+## 否则手上有箱包 → 一格格放下去，放完或放满为止。地堆、卸货区、停着的车都算，设备和过道不算。
+## 走路和每件 2 秒（【搬运】Lv2 ×0.8）照算。返回动了几件。
+func marquee(cells: Array) -> int:
+	var h := api.carrier()
+	var sources: Array = []
+	var targets: Array = []
+	for c in cells:
+		var sl := _marquee_slot(c)
+		if sl == null or sl.id == h.id:
+			continue
+		targets.append(c)
+		if not sl.packages.is_empty():
+			sources.append(c)
+	var picking := false
+	for c in sources:
+		if h.can_hold(_marquee_slot(c).packages[-1]):
+			picking = true
+			break
+	if not picking and h.packages.is_empty():
+		say.call("框里没有抱得起的箱包。" if not sources.is_empty() else "框里没有箱包。")
+		return 0
+	var moved := 0
+	var todo: Array = (sources if picking else targets).duplicate()
+	while not todo.is_empty():
+		if (picking and _carrier_full(h)) or (not picking and h.packages.is_empty()):
+			break
+		var c: Vector2i = _nearest(todo)
+		todo.erase(c)
+		var sl := _marquee_slot(c)
+		# 走过去之前先看看：这格最上面那件抱得起 / 手上那件放得下，不然白跑
+		if picking and not h.can_hold(sl.packages[-1]):
+			continue
+		if not picking and not sl.can_hold(h.packages[-1]):
+			continue
+		var reached := walk_to_cart() if sl.type == "Cart" else walk_to(c)
+		if not reached:
+			continue
+		while true:
+			var r := api.take_package(sl.id) if picking else api.put_package(sl.id)
+			if not r["ok"]:
+				break
+			spend.call(api.handle_seconds(ActionAPI.MOVE_PACKAGE_SECONDS))
+			moved += 1
+			if picking and sl.packages.is_empty():
+				break
+	if moved > 0:
+		say.call("%s了 %d 件。" % ["抱起" if picking and not h.mixes() else ("装上车" if picking else "放下"), moved])
+	elif picking:
+		say.call("抱不下了。")
+	else:
+		say.call("框里的格子放不下。")
+	return moved
+
+
+## 拉框里某格能放箱包的地方：停着的车、地堆（门口、收银台后、摆着设备的格不算）。
+func _marquee_slot(c: Vector2i) -> Slot:
+	if RoomGrid.cart_parked_at(inv(), loc, c):
+		return cart()
+	if not RoomGrid.in_room(inv(), loc, c) or RoomGrid.is_aisle(inv(), loc, c) or inv().equipment_at(loc, c) != "":
+		return null
+	return inv().floor_slot(loc, c)
+
+
+## 再也抱不下：随便哪种箱包都放不上去了。
+func _carrier_full(h: Slot) -> bool:
+	if not h.kind_limits.is_empty():
+		var kind: String = h.packages[0].kind if not h.packages.is_empty() else ""
+		return kind != "" and h.packages.size() >= int(h.kind_limits.get(kind, 0))
+	return h.package_units() >= h.pkg_capacity
+
+
+## 离玩家最近（走得到）的那格。
+func _nearest(cells: Array) -> Vector2i:
+	var best: Vector2i = cells[0]
+	var best_n := 1 << 30
+	for c in cells:
+		var n := RoomGrid.steps_to(inv(), loc, player_cell, c)
+		if n >= 0 and n < best_n:
+			best_n = n
+			best = c
+	return best
+
+
 # ---------- 近景面板 ----------
 ## 选中那格上的货位：设备的每一格，或者地上那一堆。
 func closeup(box: HBoxContainer, highlight := "") -> void:

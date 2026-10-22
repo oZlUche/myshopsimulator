@@ -27,11 +27,13 @@ func _ready() -> void:
 	ops.player_cell = door
 	_view.place_player(door)
 	_view.cell_clicked.connect(_on_cell)
+	_view.cells_selected.connect(_on_cells)
 	if Game.arrive_from == "shop":
 		_say("推着车到了仓库。" if s.player.pushing_cart else "到仓库了。")
 	else:
 		_say("到仓库了。托运部把货卸在门口的黄框里。箱子外面只看得到物流单，拆开才知道里面是什么。")
 	_say("点一堆箱子走过去，点最上面那箱：抱起来、拆箱、拿一包出来、写标签。抱着东西点别的格子空处就放下。")
+	_say("在地上按住拉框可以一次抱起好几件（拿满为止）；手上有箱包时拉框是一格格放下去。")
 	if ops.cart_here():
 		_say("点手推车把它推起来：推着车时抱起的箱包直接放车上（一车 2 箱或 6 包，另有散货篓 %d 条），推去店里路上 %d 秒。" % [Inventory.CART_BASKET, int(ShopSetup.TRIP_SECONDS)])
 	elif ops.cart() != null:
@@ -159,6 +161,17 @@ func _on_cell(c: Vector2i) -> void:
 		_say("天黑了，回家吧。")
 		return
 	ops.focus_cell(c)
+	_refresh()
+
+
+## 地上拉框：一次抱起 / 放下几件箱包（07 §2.1）。
+func _on_cells(cells: Array) -> void:
+	if ops.layout_mode:
+		return
+	if _day_over():
+		_say("天黑了，回家吧。")
+		return
+	ops.marquee(cells)
 	_refresh()
 
 
