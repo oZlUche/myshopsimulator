@@ -114,7 +114,8 @@ func apply_economy(econ: Dictionary) -> void:
 	var G := float(econ.get("G", econ.get("consumption_level", 1.0)))
 	var spend := float(econ.get("spending_power", pow(G, EconomyState.SPEND_ELASTICITY)))
 	budget_mult = spend * float(econ.get("price_level", 1.0)) * budget_noise
-	intent_shift = 0.1 * (G - 1.0)
+	# 日历事件、突发天气的意向加成（09 §1.8 节拍层）
+	intent_shift = 0.1 * (G - 1.0) + float(econ.get("rhythm_intent_add", 0.0))
 
 
 ## 第一条按趋势 + 本季材质采样；后面几条多半是第一条换个颜色或图案，偶尔完全另起。

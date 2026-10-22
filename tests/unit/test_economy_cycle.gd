@@ -136,7 +136,8 @@ func test_traffic_follows_G() -> void:
 	while not s.street.can_place(x):
 		x += 0.5
 	var ss := StallSession.new(s, x)
-	assert_near(ss._traffic_mult, 0.94, 0.0001, "过路客 × (0.7 + 0.3·G)")
+	var b := float(s.econ_now()["rhythm_mult"])
+	assert_near(ss._traffic_mult, 0.94 * b, 0.0001, "过路客 × (0.7 + 0.3·G) · B")
 
 
 func test_end_period_moves_price_level_and_list_price() -> void:

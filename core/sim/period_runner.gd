@@ -34,7 +34,9 @@ static func end_period(s: GameState) -> Dictionary:
 		"season_changed": false, "year_changed": false,
 	}
 	var ratio := (float(st["price_ratio_sum"]) / sales - 1.0) if sales > 0 else 0.0
-	s.economy.push_observation({"price_ratio": ratio, "sales": sales, "traffic": int(st["traffic"])})
+	# 客流观测先除掉节拍 B，年年都有的忙闲不当成动量（09 §1.8）
+	var b := float(s.econ_now().get("rhythm_mult_indoor" if s.player.phase == "shop" else "rhythm_mult", 1.0))
+	s.economy.push_observation({"price_ratio": ratio, "sales": sales, "traffic": float(st["traffic"]) / maxf(b, 0.01)})
 	s.trend.step(s.clock.period, s.rng)
 	var fc := Sampler.trend_forecast(s.trend, s.clock.period, s.player, s.rng)
 	s.knowledge.trend_hints.append_array(fc)

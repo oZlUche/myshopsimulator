@@ -4,6 +4,7 @@ extends Control
 var s: GameState
 var api: ActionAPI
 var _header: Label
+var _calendar: Label
 var _msg: Label
 var _tabs: TabContainer
 var _buy_box: VBoxContainer
@@ -29,6 +30,9 @@ func _ready() -> void:
 
 	_header = UIKit.label("", 20, UIKit.ACCENT)
 	root.add_child(_header)
+	_calendar = UIKit.label("", 15, UIKit.MUTED)
+	_calendar.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	root.add_child(_calendar)
 	_tabs = TabContainer.new()
 	_tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	root.add_child(_tabs)
@@ -83,6 +87,11 @@ func _say(t: String, ok: bool = true) -> void:
 func _refresh() -> void:
 	_header.text = "%s　规划（时间暂停）　现金 %.1f 元　行囊空位 %d　未分配经验 %.0f" % [
 		s.clock.label(), s.player.cash, api.bag_free_space(), s.player.xp_pool]
+	var cal := "日历　" + EconomyState.calendar_outlook(s.clock.period)
+	var weather := s.economy.weather_notice(s.clock.period)
+	if weather != "":
+		cal += "\n本旬天气：" + weather
+	_calendar.text = cal
 	_refresh_buy()
 	_refresh_bag()
 	_refresh_prices()

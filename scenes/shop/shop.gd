@@ -40,6 +40,9 @@ func _ready() -> void:
 	else:
 		_say("到店里了。开门前时间不走：点货柜走过去，把包拿起来，再点货架的空处，撕开倒上去。")
 		_say("客人只看得到货架、橱窗和模特上的货；货柜里的客人看不到。点「摆设备」可以买、挪、卖设备。")
+		var weather := s.economy.weather_notice(s.clock.period)
+		if weather != "":
+			_say("今天" + weather + "。")
 	_refresh_all()
 
 
