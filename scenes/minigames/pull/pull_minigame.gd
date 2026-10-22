@@ -4,6 +4,7 @@ extends Control
 ## 最佳：按角落、斜向 30°–45°、先慢后快。上方越重，货越"跟不上手"。
 ## 货抽出多少就停在多少，不会缩回；可以分几次拉，累计抽出一半就算抽出来了。
 ## 每段（按住到松手）各自换算成偏差分，经 ActionAPI.pull_segment 单独掷一次倒塌 / 位移判定。
+## 整块抽取（03 §2.6）：[index, hi] 一起拉，块越厚越沉（k_w 加大）、上面越容易塌（α 加大）。
 
 ## result: {resolved: true, out, collapsed, displaced}。success 时直接交给 ActionAPI 取货（判定已经掷过）。
 signal finished(success: bool, result: Dictionary, seconds: float)
@@ -13,6 +14,8 @@ const BAR_H := 24.0
 
 var stack: ItemStack
 var index: int
+## 整块抽取时块最上面那份；单份抽取时等于 index
+var hi: int
 var title := ""
 var api: ActionAPI
 var slot_id := ""
@@ -36,16 +39,17 @@ var _displaced := false
 var _lift := 0.0
 
 
-func setup(action_api: ActionAPI, sl_id: String, idx: int, t: String) -> PullMinigame:
+func setup(action_api: ActionAPI, sl_id: String, idx: int, t: String, block_hi: int = -1) -> PullMinigame:
 	api = action_api
 	slot_id = sl_id
 	stack = api.s.inventory.slots[sl_id].stack
 	index = idx
+	hi = maxi(idx, block_hi)
 	title = t
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	UIKit.full_rect(self)
 	_out = stack.items[idx].pull_out
-	_hint = "按住白框那份货的一角，斜着往外拉，先慢后快。" if _out == 0.0 \
+	_hint = ("按住白框那块的一角，斜着往外拉，先慢后快。块越厚越沉。" if hi > index else "按住白框那份货的一角，斜着往外拉，先慢后快。") if _out == 0.0 \
 		else "上次已经抽出 %d%%，接着拉。" % roundi(absf(_out) * 100.0)
 	return self
 
@@ -66,8 +70,12 @@ func _panel() -> Rect2:
 
 
 func _target_rect() -> Rect2:
-	var r := _bar_rect(index)
+	var r := _bar_rect(index).merge(_bar_rect(hi))
 	return Rect2(r.position + Vector2(_out * BAR_W, _lift), r.size)
+
+
+func _block_n() -> int:
+	return hi - index + 1
 
 
 ## 第 i 份货的位置：按它实际所在的层画（下面被抽空的层留着空隙）。
@@ -100,7 +108,7 @@ func drag_step(m: Vector2, dt: float) -> void:
 	if hand.length() > 0.0:
 		var theta := rad_to_deg(atan2(absf(hand.y), absf(hand.x)))
 		var v_hand := hand.length() / maxf(dt, 0.001)
-		var v_item := PullPhysics.item_speed(v_hand, stack.weight_above(index), theta, _point)
+		var v_item := PullPhysics.item_speed(v_hand, stack.weight_above(hi), theta, _point, PullPhysics.block_kw_mult(_block_n()))
 		var step := hand.normalized() * v_item * dt
 		# 货沿着抽出的方向走，手往外拖多远（按跟手比例打折）它就出来多远；
 		# 只要一直拖就一定能带出，手法差只是更慢、更容易塌（03 §2.0）。往回推不动，不会缩回。
@@ -128,7 +136,7 @@ func _end_segment() -> void:
 	if _out == _seg_start:
 		return
 	var d := PullPhysics.deviation_from_input(PullPhysics.input_from_drag(_samples, _point))
-	var res := api.pull_segment(slot_id, index, _out, d, _seg_shift)
+	var res := api.pull_segment(slot_id, index, _out, d, _seg_shift, hi)
 	_seg_shift = 0.0
 	if res["collapsed"]:
 		_collapsed = true
@@ -175,31 +183,35 @@ func _point_kind(p: Vector2) -> String:
 
 
 func _draw() -> void:
-	if stack == null or _done or index >= stack.height():
+	if stack == null or _done or hi >= stack.height():
 		return
 	draw_rect(Rect2(Vector2.ZERO, size), Color(0, 0, 0, 0.6))
 	draw_rect(_panel(), UIKit.PANEL)
 	var font := get_theme_default_font()
 	draw_string(font, _panel().position + Vector2(20, 32), title, HORIZONTAL_ALIGNMENT_LEFT, -1, 20, UIKit.ACCENT)
-	var n := stack.count_above(index)
-	draw_string(font, _panel().position + Vector2(20, 58), "上面压着 %d 份。%s" % [n, _hint], HORIZONTAL_ALIGNMENT_LEFT, 680, 15, UIKit.TEXT)
+	var n := stack.count_above(hi)
+	var block := "整块 %d 份，" % _block_n() if hi > index else ""
+	draw_string(font, _panel().position + Vector2(20, 58), "%s上面压着 %d 份。%s" % [block, n, _hint], HORIZONTAL_ALIGNMENT_LEFT, 680, 15, UIKit.TEXT)
 	# 桌面
 	var table_y := _panel().end.y - 70
 	draw_rect(Rect2(_panel().position.x + 140, table_y, BAR_W + 80, 10), Color("#8a6a4a"))
 	# 上方的货被带歪的位置一直保留；这一段正在带动的部分先画出来，松手后记进货堆
 	for i in stack.height():
-		if i == index:
+		if i >= index and i <= hi:
 			continue
 		var sh := stack.items[i].shift
-		if i > index:
-			sh = clampf(sh + _seg_shift * ActionAPI.ABOVE_DRAG * (i - index), -ActionAPI.MAX_SHIFT, ActionAPI.MAX_SHIFT)
+		if i > hi:
+			sh = clampf(sh + _seg_shift * ActionAPI.ABOVE_DRAG * (i - hi), -ActionAPI.MAX_SHIFT, ActionAPI.MAX_SHIFT)
 		var r := _bar_rect(i)
 		_draw_bar(Rect2(r.position + Vector2(sh * BAR_W, 0), r.size), stack.items[i].sku_id, false)
 	for i in stack.collapsed_pile.size():
 		var pr := Rect2(_panel().position.x + 150 + (i % 6) * 64.0, table_y + 12 + floorf(i / 6.0) * 8.0, 56, 8)
 		draw_rect(pr, UIKit.sku_color(stack.collapsed_pile[i].sku_id))
 	var tr := _target_rect()
-	_draw_bar(tr, stack.items[index].sku_id, true)
+	for i in range(index, hi + 1):
+		var br := _bar_rect(i)
+		_draw_bar(Rect2(br.position + Vector2(_out * BAR_W, _lift), br.size), stack.items[i].sku_id, false)
+	draw_rect(tr, Color(1, 1, 1, 0.9), false, 2.0)
 	# 抽出进度：过了虚线就算抽出来了
 	var home := _bar_rect(index)
 	var dir := -1.0 if _out < 0.0 else 1.0

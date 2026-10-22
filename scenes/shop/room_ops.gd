@@ -145,9 +145,11 @@ func view_for(sl: Slot, title: String, highlight := "") -> Control:
 		return pv
 	var v := StackView.new().setup(sl, title)
 	v.highlight_item_id = highlight
-	for pair in [["top_pressed", "_on_top"], ["strip_pressed", "_on_strip"], ["strip_peek", "_on_peek"], ["pile_pressed", "_on_pile"]]:
+	for pair in [["top_pressed", "_on_top"], ["strip_pressed", "_on_strip"], ["strip_peek", "_on_peek"], ["pile_pressed", "_on_pile"], ["range_selected", "_on_range"]]:
 		if host.has_method(pair[1]):
 			v.connect(pair[0], Callable(host, pair[1]))
+	if host.has_method("_show_hand_pick"):
+		host._show_hand_pick(v)
 	v.slot_pressed.connect(func(id): host._on_slot(id))
 	return v
 

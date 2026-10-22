@@ -106,21 +106,24 @@ func place_on_top(item: ScarfItem, slot_id: String, _actor: String = "player") -
 ## 抽取小游戏里拉完一段（按住到松手）：货停在抽出的位置不缩回，上方的货被带歪的状态保留；
 ## 这段手法单独掷一次倒塌 / 位移判定（03 §2.1）。out: 目标已抽出的比例（±）；
 ## d: 这段的偏差分；shift: 这段把目标横向带动了多少（±，占货长比例），上方的货按层数传递一部分。
+## hi ≥ index 时是整块抽取 [index, hi]（03 §2.6）：整块一起出来，压在块上面的才会塌，块越厚越容易塌。
 ## 返回 {collapsed, displaced, d, p_collapse}。塌了的话目标上面的货全倒在地上，目标本身还在原位露着。
-func pull_segment(slot_id: String, index: int, out: float, d: float, shift: float) -> Dictionary:
+func pull_segment(slot_id: String, index: int, out: float, d: float, shift: float, hi: int = -1) -> Dictionary:
 	var res := {"collapsed": false, "displaced": false, "d": d, "p_collapse": 0.0}
 	var sl := _slot(slot_id)
 	if sl == null or index < 0 or index >= sl.stack.height():
 		return res
 	var st := sl.stack
-	st.items[index].pull_out = clampf(out, -PULL_DONE, PULL_DONE)
-	for i in range(index + 1, st.height()):
+	var top := clampi(maxi(hi, index), index, st.height() - 1)
+	for i in range(index, top + 1):
+		st.items[i].pull_out = clampf(out, -PULL_DONE, PULL_DONE)
+	for i in range(top + 1, st.height()):
 		var above: ScarfItem = st.items[i]
-		above.shift = clampf(above.shift + shift * ABOVE_DRAG * (i - index), -MAX_SHIFT, MAX_SHIFT)
-	var n_above := st.count_above(index)
+		above.shift = clampf(above.shift + shift * ABOVE_DRAG * (i - top), -MAX_SHIFT, MAX_SHIFT)
+	var n_above := st.count_above(top)
 	if n_above > 0 and PHYSICS_SLOT_TYPES.has(sl.type):
-		res = PullPhysics.resolve(d, n_above, s.rng)
-		_apply_physics(sl, index + 1, res)
+		res = PullPhysics.resolve(d, n_above, s.rng, PullPhysics.block_alpha_mult(top - index + 1))
+		_apply_physics(sl, top + 1, res)
 	st.recompute_disorder()
 	_touch(sl)
 	return res
@@ -179,15 +182,106 @@ func take_top(slot_id: String, _actor: String = "player") -> ScarfItem:
 	return pull_item(slot_id, sl.stack.height() - 1, {"resolved": true})["item"]
 
 
-## 从一个堆顶拿一份到手上；手上满了返回 null。散货上限看【搬运】（02 §2.10）。
-func take_top_to_hand(slot_id: String) -> ScarfItem:
+## 从一个堆顶拿 count 份到手上（框选批量拆顶就是单份拆顶重复 count 次，03 §2.6），拿到手上满为止。
+## 返回最后拿起的那份（现在在手上最上面）；一份都没拿到返回 null。散货上限看【搬运】（02 §2.10）。
+func take_top_to_hand(slot_id: String, count: int = 1) -> ScarfItem:
 	var h := s.inventory.hand()
-	if h.stack.is_full() or slot_id == h.id or not h.packages.is_empty():
+	var last: ScarfItem = null
+	if slot_id == h.id or not h.packages.is_empty():
 		return null
-	var it := take_top(slot_id)
-	if it != null:
+	for i in count:
+		if h.stack.is_full():
+			break
+		var it := take_top(slot_id)
+		if it == null:
+			break
 		place_on_top(it, h.id)
-	return it
+		last = it
+	return last
+
+
+## 手上还能拿几条散货（抱着箱包时为 0）。
+func hand_room() -> int:
+	var h := s.inventory.hand()
+	return 0 if not h.packages.is_empty() else h.stack.max_height - h.stack.height()
+
+
+## 整块抽取（03 §2.6）：把 [lo, hi] 这一段当一块从堆里抽出来，按原顺序进手上（块最上面那份在手上最上面）。
+## 块得放得进手上（≤ 手上余量），否则不动、返回 item 为 null。判定同 pull_item：pull_input.resolved 为真
+## 表示小游戏里已经一段段掷过；否则按手法 / 执行者属性掷一次，倒塌系数按块厚加大。
+## 取走后上面的货不往下沉，留出 n 层空隙。返回 {items, item（块最上面那份）, collapsed, displaced, d}。
+func pull_block(slot_id: String, lo: int, hi: int, pull_input: Dictionary = CAREFUL_PULL, actor_profile: Dictionary = {}) -> Dictionary:
+	var out := {"items": [], "item": null, "collapsed": false, "displaced": false, "d": 0.0}
+	var sl := _slot(slot_id)
+	var h := s.inventory.hand()
+	if sl == null or slot_id == h.id or lo < 0 or hi < lo or hi >= sl.stack.height():
+		return out
+	var n := hi - lo + 1
+	if n > hand_room():
+		return out
+	var st := sl.stack
+	var res := {"collapsed": false, "displaced": false, "d": 0.0}
+	if pull_input.get("resolved", false):
+		res = {"collapsed": pull_input.get("collapsed", false), "displaced": pull_input.get("displaced", false), "d": 0.0}
+	elif st.count_above(hi) > 0 and PHYSICS_SLOT_TYPES.has(sl.type):
+		var d := PullPhysics.deviation_from_actor(actor_profile, s.rng) if not actor_profile.is_empty() \
+			else PullPhysics.deviation_from_input(pull_input)
+		res = PullPhysics.resolve(d, st.count_above(hi), s.rng, PullPhysics.block_alpha_mult(n))
+	var block: Array[ScarfItem] = []
+	var gaps := 0
+	for i in n:
+		var it: ScarfItem = st.items[lo]
+		st.items.remove_at(lo)
+		gaps += 1 + it.gap_below
+		block.append(it)
+	if not pull_input.get("resolved", false):
+		_apply_physics(sl, lo, res)
+	if lo < st.height():
+		st.items[lo].gap_below += gaps
+	st.recompute_disorder()
+	_touch(sl)
+	for it in block:
+		it.reset_pull()
+		place_on_top(it, h.id)
+	res["items"] = block
+	res["item"] = block[-1]
+	return res
+
+
+## 批量翻看（03 §2.6）：对 [lo, hi] 逐份 peek_item，每份 2 秒（时间由场景花）。返回每份的翻看结果。
+func peek_range(slot_id: String, lo: int, hi: int, _actor: String = "player") -> Array:
+	var out: Array = []
+	for i in range(lo, hi + 1):
+		var p := peek_item(slot_id, i)
+		if not p.is_empty():
+			out.append(p)
+	return out
+
+
+## 把手上第 lo 份起的 count 份按原顺序依次放到某堆顶（03 §2.6 手上框选后批量放下）；lo < 0 表示最上面 count 份。
+## 放不下的留在手上。返回放下了几份（每份 TAKE_TOP_SECONDS，由场景花）。
+func place_from_carrier(slot_id: String, count: int, lo: int = -1) -> int:
+	var h := s.inventory.hand()
+	var dst := _slot(slot_id)
+	if dst == null or slot_id == h.id or count <= 0:
+		return 0
+	var start := h.stack.height() - count if lo < 0 else lo
+	start = clampi(start, 0, h.stack.height())
+	var end := mini(start + count, h.stack.height())
+	var moving: Array[ScarfItem] = []
+	for i in range(start, end):
+		moving.append(h.stack.items[i])
+	var placed := 0
+	for it in moving:
+		if dst.stack.is_full() or not dst.packages.is_empty():
+			break
+		h.stack.items.erase(it)
+		place_on_top(it, slot_id)
+		placed += 1
+	if placed > 0:
+		h.stack.settle()
+		h.stack.recompute_disorder()
+	return placed
 
 
 ## NPC（客人自取 / 员工）去拿堆里第 index 份（03 §5）：按性格选拿法。

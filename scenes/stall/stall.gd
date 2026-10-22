@@ -34,6 +34,8 @@ var _bundle_spin: SpinBox
 var _sold_out_timer := -1.0
 ## 再问客人时【强化记忆】想起来的那份（加亮）：{visitor, item_id}
 var _reask_mark: Dictionary = {}
+## 手上框选好、等着一起放下的那段 [lo, hi]（03 §2.6）；空 = 没选
+var _hand_pick: Array = []
 var _table_empty_hinted := false
 
 
@@ -49,6 +51,7 @@ func _ready() -> void:
 	_area.visitor_clicked.connect(_on_visitor_clicked)
 	_say("找好位置了。先把行囊里的货摆到摊位上，然后开张。时间还没开始走。")
 	_say("点堆顶那份的顶面：从顶部拿一份到手上，不会塌；点下面某份的侧面：从中间抽，抽不好上面会塌。再点某一格的空处，把手上的货放到那堆顶上。")
+	_say("按住拉框可以一次选好几份：框到堆顶就一份份拆下来，没框到堆顶就整块抽（块越厚越容易塌）；右键拉框一起翻看；在手上拉框选好再点某格空处，一起放下。")
 	_refresh_all()
 
 
@@ -216,6 +219,8 @@ func _refresh_slots() -> void:
 			v.strip_peek.connect(_on_peek)
 			v.slot_pressed.connect(_on_slot)
 			v.pile_pressed.connect(_on_pile)
+			v.range_selected.connect(_on_range)
+			_show_hand_pick(v)
 			box.add_child(v)
 
 
@@ -315,9 +320,24 @@ func _take_to_hand(slot_id: String, index: int, input: Dictionary) -> void:
 
 
 ## 点某一格的空处：把手上最上面那份放到这堆顶上（03 §4：只能放顶，不能插回原位）。
+## 手上框选了一段时，这一段按原顺序一起放上去（03 §2.6），放不下的留在手上。
 func _on_slot(slot_id: String) -> void:
 	var h := _hand()
 	if slot_id == h.id:
+		if not _hand_pick.is_empty():
+			_hand_pick = []
+			_refresh_slots()
+		return
+	if not _hand_pick.is_empty():
+		var lo: int = _hand_pick[0]
+		var k: int = int(_hand_pick[1]) - lo + 1
+		_hand_pick = []
+		var placed := api.place_from_carrier(slot_id, k, lo) if lo + k <= h.stack.height() else 0
+		if placed > 0:
+			_spend(api.handle_seconds(ActionAPI.TAKE_TOP_SECONDS) * placed)
+		if placed < k:
+			_say("放不下了，%d 份还在手上。" % (k - placed) if placed > 0 else "放不下了。")
+		_refresh_slots()
 		return
 	if h.stack.height() == 0:
 		_say("手上没货。点堆顶拿一份，或点侧面从中间抽一份。")
@@ -327,6 +347,68 @@ func _on_slot(slot_id: String) -> void:
 		_say("放不下了。")
 	else:
 		_spend(api.handle_seconds(ActionAPI.TAKE_TOP_SECONDS))
+	_refresh_slots()
+
+
+## 手上框选的那段画出来（只有手上那一格）。
+func _show_hand_pick(v: StackView) -> void:
+	if v.slot.type == "Hand" and not _hand_pick.is_empty() and int(_hand_pick[1]) < v.slot.stack.height():
+		v.sel_lo = _hand_pick[0]
+		v.sel_hi = _hand_pick[1]
+
+
+## 拉框选了一段（03 §2.6）：在手上 = 选好等放下；右键 = 一起翻看；含堆顶 = 一份份拆下来；不含 = 整块抽。
+func _on_range(slot_id: String, lo: int, hi: int, right: bool) -> void:
+	var h := _hand()
+	var n := hi - lo + 1
+	if slot_id == h.id and not right:
+		_hand_pick = [lo, hi]
+		_say("手上选了 %d 份，点某一格的空处一起放下（点手上空处取消）。" % n)
+		_refresh_slots()
+		return
+	_hand_pick = []
+	if right:
+		var seen := api.peek_range(slot_id, lo, hi)
+		var names: Array = []
+		for p in seen:
+			names.append(UIKit.sku_name(p["sku_guess"]) + ("?" if p["may_be_wrong"] else ""))
+		_say("一份份掀起来看了看：%s。" % "、".join(names))
+		_spend(2.0 * seen.size())
+		_refresh_slots()
+		return
+	if not h.packages.is_empty():
+		_say("手上抱着箱包，先放下才能拿散货。")
+		return
+	var room := api.hand_room()
+	if room <= 0:
+		_say("手上拿不下了，先点某一格的空处放下。")
+		return
+	var sl: Slot = s.inventory.slots[slot_id]
+	if hi >= sl.stack.height() - 1:
+		var before := h.stack.height()
+		api.take_top_to_hand(slot_id, n)
+		var got := h.stack.height() - before
+		_spend(api.handle_seconds(ActionAPI.TAKE_TOP_SECONDS) * got)
+		if got < n:
+			_say("手上只能再拿 %d 份，拿了 %d 份。" % [room, got])
+		_refresh_slots()
+		return
+	if n > room:
+		_say("这一块 %d 份，手上只能再拿 %d 份，先放下一些。" % [n, room])
+		return
+	_with_pull(slot_id, lo, func(input): _take_block(slot_id, lo, hi, input), hi)
+
+
+func _take_block(slot_id: String, lo: int, hi: int, input: Dictionary) -> void:
+	var r := api.pull_block(slot_id, lo, hi, input)
+	if r["item"] == null:
+		return
+	if r["collapsed"]:
+		_say("[color=#e05a4f]整块抽的时候上面的货塌了，掉了一地！点地上那堆可以拾起来。[/color]")
+	elif r["displaced"]:
+		_say("上面那几份被带歪了。")
+	if not input.get("resolved", false):
+		_spend(1.0)
 	_refresh_slots()
 
 
@@ -348,12 +430,14 @@ func _on_pile(slot_id: String) -> void:
 
 
 ## 从堆下面抽货要玩抽取小游戏；顶上的、行囊里的直接拿。then(input) 在拿到之后调用。
-func _with_pull(slot_id: String, index: int, then: Callable) -> void:
+## hi > index 是整块抽取 [index, hi]（03 §2.6）。
+func _with_pull(slot_id: String, index: int, then: Callable, hi: int = -1) -> void:
 	var sl: Slot = s.inventory.slots[slot_id]
-	if index >= sl.stack.height() - 1 or not ActionAPI.PHYSICS_SLOT_TYPES.has(sl.type):
+	var top := maxi(index, hi)
+	if top >= sl.stack.height() - 1 or not ActionAPI.PHYSICS_SLOT_TYPES.has(sl.type):
 		then.call(ActionAPI.CAREFUL_PULL)
 		return
-	_minigame = PullMinigame.new().setup(api, slot_id, index, "从堆里抽出这份")
+	_minigame = PullMinigame.new().setup(api, slot_id, index, "从堆里抽出这份" if top == index else "整块抽出这 %d 份" % (top - index + 1), top)
 	add_child(_minigame)
 	_minigame.finished.connect(func(ok, result, seconds):
 		_minigame.queue_free()
