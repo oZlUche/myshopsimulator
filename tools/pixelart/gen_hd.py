@@ -108,6 +108,13 @@ def refine_body(L, frame, back, pose="walk"):
         for (x, y), v in list(top.px.items()):
             if v in (235, 170) and y >= t0 and top.px.get((x, y + 1)) != v and (x, y + 1) not in top:
                 top.put(x, y, 205 if v == 235 else 150)
+    elif pose == "carry":
+        # 抱东西：袖口在前臂收进来的那一格
+        for y in range(t0 + 10, t0 + 12):
+            for x in range(12, 14):
+                top.put(x, y, 205)
+            for x in range(34, 36):
+                top.put(x, y, 150)
     else:
         swing = S if frame == 1 else (-S if frame == 3 else 0)
         la, ra = t0 - swing, t0 + swing
@@ -506,9 +513,10 @@ def generate(out):
     sheets = build_person()
     for k, img in sheets.items():
         write(img, "person_" + k if k != "hair" else "hair")
-    for k, img in build_person("push").items():
-        if k != "hair":
-            write(img, "person_push_" + k)
+    for pose in ("push", "carry"):
+        for k, img in build_person(pose).items():
+            if k != "hair":
+                write(img, "person_%s_%s" % (pose, k))
     rng = random.Random(11)
     for kind in ["pavement", "road", "grass", "lot", "concrete", "wood", "tile"]:
         for v in range(2):

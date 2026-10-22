@@ -19,6 +19,61 @@
    0.78
   ]
  },
+ "eq_shop_shelf_front_sw": {
+  "size": [
+   34,
+   57
+  ],
+  "anchor": [
+   17,
+   40
+  ],
+  "H": 39
+ },
+ "eq_shop_shelf_board0_sw": {
+  "size": [
+   34,
+   57
+  ],
+  "anchor": [
+   17,
+   40
+  ],
+  "H": 39
+ },
+ "eq_shop_shelf_board1_sw": {
+  "size": [
+   34,
+   57
+  ],
+  "anchor": [
+   17,
+   40
+  ],
+  "H": 39
+ },
+ "eq_shop_shelf_board2_sw": {
+  "size": [
+   34,
+   57
+  ],
+  "anchor": [
+   17,
+   40
+  ],
+  "H": 39
+ },
+ "eq_shop_shelf_board3_sw": {
+  "size": [
+   34,
+   57
+  ],
+  "anchor": [
+   17,
+   40
+  ],
+  "H": 39
+ },
  "eq_shop_cabinet_sw": {
   "size": [
    34,
@@ -101,6 +156,61 @@
    0.1
   ]
  },
+ "eq_warehouse_rack_front_sw": {
+  "size": [
+   34,
+   64
+  ],
+  "anchor": [
+   17,
+   47
+  ],
+  "H": 46
+ },
+ "eq_warehouse_rack_board0_sw": {
+  "size": [
+   34,
+   64
+  ],
+  "anchor": [
+   17,
+   47
+  ],
+  "H": 46
+ },
+ "eq_warehouse_rack_board1_sw": {
+  "size": [
+   34,
+   64
+  ],
+  "anchor": [
+   17,
+   47
+  ],
+  "H": 46
+ },
+ "eq_warehouse_rack_board2_sw": {
+  "size": [
+   34,
+   64
+  ],
+  "anchor": [
+   17,
+   47
+  ],
+  "H": 46
+ },
+ "eq_warehouse_rack_board3_sw": {
+  "size": [
+   34,
+   64
+  ],
+  "anchor": [
+   17,
+   47
+  ],
+  "H": 46
+ },
  "eq_handcart_sw": {
   "size": [
    28,
@@ -153,6 +263,61 @@
    0.78,
    0.2
   ]
+ },
+ "eq_shop_shelf_front_se": {
+  "size": [
+   34,
+   57
+  ],
+  "anchor": [
+   17,
+   40
+  ],
+  "H": 39
+ },
+ "eq_shop_shelf_board0_se": {
+  "size": [
+   34,
+   57
+  ],
+  "anchor": [
+   17,
+   40
+  ],
+  "H": 39
+ },
+ "eq_shop_shelf_board1_se": {
+  "size": [
+   34,
+   57
+  ],
+  "anchor": [
+   17,
+   40
+  ],
+  "H": 39
+ },
+ "eq_shop_shelf_board2_se": {
+  "size": [
+   34,
+   57
+  ],
+  "anchor": [
+   17,
+   40
+  ],
+  "H": 39
+ },
+ "eq_shop_shelf_board3_se": {
+  "size": [
+   34,
+   57
+  ],
+  "anchor": [
+   17,
+   40
+  ],
+  "H": 39
  },
  "eq_shop_cabinet_se": {
   "size": [
@@ -235,6 +400,61 @@
    0.1,
    0.08
   ]
+ },
+ "eq_warehouse_rack_front_se": {
+  "size": [
+   34,
+   64
+  ],
+  "anchor": [
+   17,
+   47
+  ],
+  "H": 46
+ },
+ "eq_warehouse_rack_board0_se": {
+  "size": [
+   34,
+   64
+  ],
+  "anchor": [
+   17,
+   47
+  ],
+  "H": 46
+ },
+ "eq_warehouse_rack_board1_se": {
+  "size": [
+   34,
+   64
+  ],
+  "anchor": [
+   17,
+   47
+  ],
+  "H": 46
+ },
+ "eq_warehouse_rack_board2_se": {
+  "size": [
+   34,
+   64
+  ],
+  "anchor": [
+   17,
+   47
+  ],
+  "H": 46
+ },
+ "eq_warehouse_rack_board3_se": {
+  "size": [
+   34,
+   64
+  ],
+  "anchor": [
+   17,
+   47
+  ],
+  "H": 46
  },
  "eq_handcart_se": {
   "size": [
@@ -334,5 +554,16 @@
    4
   ],
   "H": 3
+ },
+ "eq_carton_carry": {
+  "size": [
+   12,
+   13
+  ],
+  "anchor": [
+   6,
+   7
+  ],
+  "H": 6
  }
 }
