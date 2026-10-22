@@ -128,20 +128,29 @@ func _init() -> void:
 	await shot("s5_warehouse")
 	var ops = wh.ops
 	var cart = ops.cart()
+	assert(s.player.cart_room == "warehouse" and not s.player.pushing_cart, "手推车停在仓库")
+	assert(not RoomGrid.walkable(s.inventory, "warehouse", s.player.cart_cell), "停着的车占一格")
+	# 抱一箱放到停着的车上（老办法照样行）
 	var unload = s.inventory.floor_slot("warehouse", Vector2i(2, 4))
 	wh._on_cell(Vector2i(2, 4))
 	ops.take(unload.id)
 	assert(s.inventory.hand().packages.size() == 1 and s.inventory.hand().packages[0].is_box())
 	ops._cart_slot(cart.id)
 	assert(cart.packages.size() == 1, "一箱上车")
-	# 第二箱码到货架上
+	# 点停着的车 = 走过去推起来（07 §2.1）；推着车时抱起的箱直接上车，点货架空处就从车上卸
+	var t_push = s.clock.time_of_period
+	wh._on_cell(s.player.cart_cell)
+	assert(s.player.pushing_cart, "推起车了")
+	assert(s.clock.time_of_period > t_push, "推车花时间")
 	wh._on_cell(Vector2i(2, 4))
 	ops.take(unload.id)
+	assert(cart.packages.size() == 2 and s.inventory.hand().packages.is_empty(), "推车时箱子直接进车")
 	wh._on_cell(Vector2i(0, 0))
 	var rack = s.inventory.equipment_slots(s.inventory.equipment_at("warehouse", Vector2i(0, 0)))[0]
 	wh._on_slot(rack.id)
-	assert(rack.packages.size() == 1, "码到仓库货架上")
-	# 拆一箱，看看箱里，拿两包，写标签
+	assert(rack.packages.size() == 1 and cart.packages.size() == 1, "从车上卸到仓库货架上")
+	await shot("s5b_warehouse_pushing")
+	# 拆一箱，看看箱里，拿两包（推着车 → 进车），写标签
 	var other = s.inventory.floor_slot("warehouse", Vector2i(3, 4))
 	wh._on_cell(Vector2i(3, 4))
 	var box = other.packages[-1]
@@ -152,7 +161,7 @@ func _init() -> void:
 	assert(s.knowledge.labels[box.id] == "测试箱")
 	ops.pack_from_box(other.id)
 	ops.pack_from_box(other.id)
-	assert(s.inventory.hand().packages.size() == 2)
+	assert(cart.packages.size() == 3, "一箱两包在车上：%d" % cart.packages.size())
 	var items = ops.menu_items(other.id)
 	assert(items.size() >= 3, "箱子菜单")
 	ops.package_menu(other.id, Vector2(500, 380))
@@ -160,9 +169,10 @@ func _init() -> void:
 	for c in wh.get_children():
 		if c is PopupMenu:
 			c.hide()
-	ops._cart_slot(cart.id)
-	ops._cart_slot(cart.id)
-	assert(cart.packages.size() == 3, "一箱两包上车：%d" % cart.packages.size())
+	# 车上那包撕开，拿一条进散货篓
+	ops.open_pack(cart.id)
+	ops.item_from_pack(cart.id)
+	assert(cart.stack.height() == 1, "车上的开口包拿一条进篓")
 	wh._on_cell(Vector2i(4, 2))
 	await shot("s7_warehouse_loaded")
 	var t_before = s.clock.time_of_period
@@ -170,23 +180,25 @@ func _init() -> void:
 	await wait_scene("Shop")
 	sh = scene()
 	assert(s.clock.time_of_period > t_before)
+	assert(s.player.pushing_cart and s.player.cart_room == "shop", "车跟着推回店里")
 	assert(sh.ops.player_cell == s.inventory.room_cell("shop", "door"), "从仓库回来站在门口")
-	# 卸车：一包倒到货架上，一箱堆到店里地上
-	sh.ops.walk_to_cart()
-	sh.ops.take(cart.id)
+	# 卸车：点货架空处先卸篓里的散货，篓空了再把车上那包撕开倒上去
 	var free_slot = null
 	for d in s.inventory.slots_in("shop", "ShopDisplay"):
-		if d.stack.height() == 0:
+		if d.stack.max_height - d.stack.height() >= 2:
 			free_slot = d
 			break
 	if free_slot != null:
 		var e = s.inventory.equipment[free_slot.equipment_id]
 		sh._on_cell(Vector2i(int(e["pos"][0]), int(e["pos"][1])))
+		var h0 = free_slot.stack.height()
 		sh._on_slot(free_slot.id)
+		assert(free_slot.stack.height() == h0 + 1 and cart.stack.height() == 0, "先卸篓里那条")
+		sh._on_slot(free_slot.id)
+		assert(free_slot.stack.height() > h0 + 1, "再把车上的包倒上去")
 	else:
 		sh._on_cell(Vector2i(6, 0))
 		sh._on_slot(s.inventory.slots_in("shop", "ShopBackroom")[1].id)
-	assert(s.inventory.hand().packages.size() <= 1)
 	await shot("s8_shop_unloaded")
 
 	# ---------- 开门营业 ----------
@@ -225,11 +237,16 @@ func _init() -> void:
 						if not at.is_empty():
 							var sl = s.inventory.slots[at["slot_id"]]
 							var e = s.inventory.equipment[sl.equipment_id]
+							# 讲价时车原地停下了；推起车去拿货，拿到的进散货篓，回来从车上交（07 §2.1）
+							assert(not s.player.pushing_cart, "讲价前车原地停下")
+							assert(sh.ops.push_cart(), "推起车")
 							sh._on_cell(Vector2i(int(e["pos"][0]), int(e["pos"][1])))
+							assert(s.player.pushing_cart, "推着车去拿货")
 							if at["index"] == sl.stack.height() - 1:
 								sh._on_top(sl.id)
 							else:
 								sh._take_to_hand(sl.id, at["index"], ActionAPI.CAREFUL_PULL)
+							assert(cart.stack.index_of(v["item_id"]) >= 0, "拿到的货在车上")
 							# 让人走到位再拍（客人到柜台前排队，你走到货架前）
 							for i in 30:
 								sh._view.step(0.1)
@@ -237,6 +254,9 @@ func _init() -> void:
 							var before = s.player.cash
 							sh._deliver(v)
 							sold = s.player.cash > before
+							assert(not s.player.pushing_cart and s.player.cart_room == "shop", "交货前车原地停下")
+							assert(RoomGrid.can_park(s.inventory, "shop", s.player.cart_cell) != "", "停着的车占着那格")
+							assert(sh.ops.player_cell == ShopSetup.stand_cell(s.inventory), "走回收银台后面")
 	assert(sold, "店里卖出去一单")
 	await shot("s12_after_sale")
 	sh._pack_up()

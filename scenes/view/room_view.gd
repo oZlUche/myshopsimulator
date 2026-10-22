@@ -29,9 +29,6 @@ var _player_path: Array[Vector2] = []
 var walk_mult := 1.0
 var _player_dir := Vector2(1, 0)
 var _player_phase := 0.0
-## 手推车停在哪（格坐标的脚下点）；x < -50 表示不画
-var cart_g := Vector2(-99, -99)
-var cart_slot: Slot
 ## 高亮的格子：{cell: Vector2i, color: Color}（客人要的货在哪、走不到的设备）
 var marks: Array = []
 var hover_cell := Vector2i(-1, -1)
@@ -102,6 +99,8 @@ func _height_at(c: Vector2i) -> float:
 	for sl in inv.slots_in(loc, "Floor"):
 		if sl.grid_pos == c:
 			return _pile_height(sl)
+	if RoomGrid.cart_parked_at(inv, loc, c):
+		return 24.0
 	return 0.0
 
 
@@ -172,6 +171,18 @@ func player_walking() -> bool:
 	return not _player_path.is_empty()
 
 
+## 玩家朝哪个方向（格坐标）。
+func player_dir() -> Vector2:
+	return _player_dir
+
+
+## 玩家正前方那一格的方向（取朝向里更大的那一维）。
+func player_step() -> Vector2i:
+	if absf(_player_dir.x) >= absf(_player_dir.y):
+		return Vector2i(1 if _player_dir.x >= 0.0 else -1, 0)
+	return Vector2i(0, 1 if _player_dir.y >= 0.0 else -1)
+
+
 func step(dt: float) -> void:
 	var left := dt * 4.0 * walk_mult
 	while left > 0.0 and not _player_path.is_empty():
@@ -220,8 +231,10 @@ func _draw() -> void:
 	for sl in inv.slots_in(loc, "Floor"):
 		if not sl.packages.is_empty():
 			things.append({"d": float(sl.grid_pos.x + sl.grid_pos.y) + 1.0, "kind": "pile", "slot": sl})
-	if cart_g.x > -50.0:
-		things.append({"d": cart_g.x + cart_g.y, "kind": "cart"})
+	# 停着的手推车（07 §2.1）；推着的车跟着玩家画（_collect_people）
+	var p := inv.player
+	if p != null and not p.pushing_cart and p.cart_room == loc and inv.cart() != null:
+		things.append({"d": float(p.cart_cell.x + p.cart_cell.y) + 1.0, "kind": "cart", "g": Vector2(p.cart_cell), "facing": p.cart_facing})
 	_collect_people(things)
 	things.sort_custom(_draw_before)
 	for t in things:
@@ -233,7 +246,7 @@ func _draw() -> void:
 			"person":
 				_draw_person_thing(o, t)
 			"cart":
-				_draw_cart(o)
+				_draw_cart(o, t["g"], t["facing"])
 	_draw_overlay(o)
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
@@ -371,13 +384,13 @@ func _draw_pile(o: Vector2, sl: Slot) -> void:
 			z += BAG_ART_H
 
 
-## 手推车：车板上摞着车里的箱 / 包。
-func _draw_cart(o: Vector2) -> void:
-	var g := cart_g - Vector2(0.5, 0.5)
-	Iso.draw_equipment(self, o, g, "handcart", "sw")
+## 手推车：车板上摞着车里的箱 / 包，散货篓里的围巾叠在最上面。g 是车占地的格坐标，facing 是车头朝向。
+func _draw_cart(o: Vector2, g: Vector2, facing: String) -> void:
+	Iso.draw_equipment(self, o, g, "handcart", facing)
+	var cart_slot := inv.cart()
 	if cart_slot == null:
 		return
-	var z := float(Iso.sprite_meta("eq_handcart_sw").get("H", 3))
+	var z := float(Iso.sprite_meta("eq_handcart_" + facing).get("H", 3))
 	for p in cart_slot.packages:
 		if p.is_box():
 			Iso.draw_sprite(self, o, g + Vector2(0.25, 0.3), "eq_carton_small_sw", Color.WHITE if p.sealed else Color(1.0, 0.93, 0.85), z)
@@ -386,6 +399,9 @@ func _draw_cart(o: Vector2) -> void:
 			var top := p.top_item()
 			Iso.draw_sprite(self, o, g + Vector2(0.35, 0.4), "eq_bag", Color.WHITE.lerp(UIKit.sku_color(top.sku_id), 0.45) if top else Color.WHITE, z)
 			z += BAG_ART_H
+	var items := cart_slot.stack.items
+	for i in mini(items.size(), 4):
+		Iso.draw_sprite(self, o, g + Vector2(0.3, 0.35), "fold_sw", UIKit.sku_color(items[i].sku_id).lerp(Color.WHITE, 0.08 * i), z + 3.0 * i)
 
 
 # ---------- 人 ----------
@@ -393,9 +409,14 @@ func _draw_cart(o: Vector2) -> void:
 func _collect_people(things: Array) -> void:
 	var fb := Iso.facing_of(_player_dir)
 	var foot := player_g + Vector2(0.5, 0.5)
+	var pushing := inv.player != null and inv.player.pushing_cart and inv.cart() != null
 	things.append({"d": foot.x + foot.y, "kind": "person", "g": foot, "body": UIKit.ACCENT, "hair": Color("#2a2026"),
 		"style": Iso.Hair.SHORT, "pants": Color("#3a3a4a"), "facing": fb[0], "back": fb[1], "phase": _player_phase,
-		"tag": "你", "carry": _hand_carry()})
+		"tag": "你", "carry": {} if pushing else _hand_carry(), "pose": "push" if pushing else ""})
+	if pushing:
+		# 推着的车在身前：往镜头推时车更近、后画，往里推时先画（Iso.pushed_cart）
+		var pc := Iso.pushed_cart(foot, fb[0], fb[1])
+		things.append({"d": pc["depth"], "kind": "cart", "g": pc["g"], "facing": pc["facing"]})
 
 
 ## 手上抱着什么（画在小人身前）：箱子、包或散货的颜色。
@@ -417,7 +438,8 @@ func _draw_person_thing(o: Vector2, t: Dictionary) -> void:
 	if not c.is_empty() and t["back"]:
 		Iso.draw_carried(self, o, t["g"], c)
 	Iso.draw_person(self, foot, t["body"], t["hair"], t["facing"], t["phase"], t["back"], 1.0,
-		t.get("style", -1), t.get("pants", Color(0, 0, 0, 0)), t.get("scarf", Color(0, 0, 0, 0)), "walk" if c.is_empty() else "carry")
+		t.get("style", -1), t.get("pants", Color(0, 0, 0, 0)), t.get("scarf", Color(0, 0, 0, 0)),
+		t["pose"] if t.get("pose", "") != "" else ("walk" if c.is_empty() else "carry"))
 	if not c.is_empty() and not t["back"]:
 		Iso.draw_carried(self, o, t["g"], c)
 	if t.get("tag", "") != "":

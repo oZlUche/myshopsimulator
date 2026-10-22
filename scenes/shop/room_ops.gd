@@ -1,6 +1,6 @@
 class_name RoomOps
 extends RefCounted
-## 店面和仓库共用的"动手"（07 §2–§4）：点一格走过去、近景面板（那格上的货位 + 手上 + 手推车）、
+## 店面和仓库共用的"动手"（07 §2–§4）：点一格走过去、近景面板（那格上的货位 + 手上 + 手推车）、推车 / 停车（07 §2.1）、
 ## 箱包菜单（抱起、拆箱、拿一包、看一眼、写标签…）、把手上的东西放下、摆设备。
 ## 花多少时间、说什么、怎么刷新交给场景给的回调；规则都在 ActionAPI / RoomGrid。
 
@@ -39,14 +39,23 @@ func inv() -> Inventory:
 
 
 func cart() -> Slot:
-	var carts := inv().slots_of_type("Cart")
-	return carts[0] if not carts.is_empty() else null
+	return inv().cart()
 
 
-## 手推车停在门口外面（画在门外那一溜上）。
-func cart_foot() -> Vector2:
-	var door := inv().room_cell(loc, "door")
-	return Vector2(door.x + 1.5, inv().room_size(loc).y + 0.55)
+## 手推车在不在这间屋：推着，或者停在这儿。
+func cart_here() -> bool:
+	return cart() != null and (s.player.pushing_cart or s.player.cart_room == loc)
+
+
+## 车还没停进哪间屋（老存档、刚开店）：停在这间屋门口附近。
+func ensure_cart() -> void:
+	if cart() == null or s.player.pushing_cart or s.player.cart_room != "":
+		return
+	var c := RoomGrid.nearest_parking(inv(), loc, inv().room_cell(loc, "door"))
+	if c.x >= 0:
+		s.player.cart_room = loc
+		s.player.cart_cell = c
+		s.player.cart_facing = "sw"
 
 
 # ---------- 走路 ----------
@@ -54,12 +63,14 @@ func cart_foot() -> Vector2:
 ## 走路按步数花时间，路被堵住就走不过去。
 func walk_to(c: Vector2i, onto := false) -> bool:
 	var p: Array[Vector2i] = []
+	# 推着车不进收银台后面（07 §2.1）
+	var avoid: Array = [inv().room_cell(loc, "stand")] if s.player.pushing_cart else []
 	if not onto and inv().equipment_at(loc, c) != "":
 		var f := RoomGrid.front(inv(), loc, c)
-		if RoomGrid.walkable(inv(), loc, f):
-			p = RoomGrid.path(inv(), loc, player_cell, f, true)
+		if RoomGrid.walkable(inv(), loc, f) and not avoid.has(f):
+			p = RoomGrid.path(inv(), loc, player_cell, f, true, avoid)
 	if p.is_empty():
-		p = RoomGrid.path(inv(), loc, player_cell, c, onto)
+		p = RoomGrid.path(inv(), loc, player_cell, c, onto, avoid)
 	if p.is_empty():
 		say.call("[color=#e05a4f]走不过去，路被挡住了。[/color]")
 		return false
@@ -73,8 +84,10 @@ func walk_to(c: Vector2i, onto := false) -> bool:
 	return true
 
 
-## 点地上或设备：走过去，近景面板换成那一格。
+## 点地上或设备：走过去，近景面板换成那一格。点停着的手推车 = 走过去推起来（07 §2.1）。
 func focus_cell(c: Vector2i) -> bool:
+	if RoomGrid.cart_parked_at(inv(), loc, c):
+		return push_cart()
 	if not walk_to(c):
 		return false
 	focus = c
@@ -82,9 +95,55 @@ func focus_cell(c: Vector2i) -> bool:
 	return true
 
 
-## 手推车在门口：要用它得先走到门口。
+## 要动停着的手推车得先走到它旁边；推着的车就在手边。车不在这间屋返回 false。
 func walk_to_cart() -> bool:
-	return walk_to(inv().room_cell(loc, "door"), true)
+	if cart() == null:
+		return false
+	if s.player.pushing_cart:
+		return true
+	if s.player.cart_room != loc:
+		say.call("手推车停在%s。" % ("仓库" if s.player.cart_room == ShopSetup.WAREHOUSE else "店里"))
+		return false
+	return walk_to(s.player.cart_cell)
+
+
+## 走到停着的车旁边推起来（2 秒）。手上的东西顺手放到车上。
+func push_cart() -> bool:
+	if not walk_to_cart() or s.player.pushing_cart:
+		return false
+	var r := api.push_cart()
+	if not r["ok"]:
+		say.call(r["reason"] + "。")
+		return false
+	spend.call(ActionAPI.CART_PUSH_SECONDS)
+	say.call("推起手推车%s：拿的东西直接放车上，点某格空处就从车上卸。" % ("，手上的东西顺手放到车上" if int(r["moved"]) > 0 else ""))
+	return true
+
+
+## 把推着的车停下（2 秒）：停在车头朝的那格，那格不行就停在旁边最近能停的格。门口、收银台后面不能停，
+## 也不停在会把路堵死的格（RoomGrid.parking_keeps_paths）。
+func park_cart(quiet := false) -> bool:
+	if not s.player.pushing_cart:
+		return false
+	var fb := Iso.facing_of(view.player_dir())
+	var face: String = Iso.pushed_cart(Vector2.ZERO, fb[0], fb[1])["facing"]
+	var ahead := player_cell + view.player_step()
+	var ok_ahead := RoomGrid.can_park(inv(), loc, ahead) == "" and RoomGrid.parking_keeps_paths(inv(), loc, ahead, player_cell)
+	var cell := ahead if ok_ahead else RoomGrid.nearest_parking(inv(), loc, player_cell)
+	if cell.x < 0:
+		say.call("这附近停不下车。")
+		return false
+	var r := api.park_cart(loc, cell, face)
+	if not r["ok"]:
+		say.call(r["reason"] + "。")
+		return false
+	spend.call(ActionAPI.CART_PUSH_SECONDS)
+	if focus == cell:
+		focus = Vector2i(-1, -1)
+		view.selected_cell = focus
+	if not quiet:
+		say.call("把车停下了。点手推车可以再推起来。")
+	return true
 
 
 # ---------- 近景面板 ----------
@@ -109,20 +168,61 @@ func closeup(box: HBoxContainer, highlight := "") -> void:
 	box.add_child(view_for(inv().floor_slot(loc, focus), "地上（最多摞 %d 箱）" % (Inventory.FLOOR_CAPACITY / Package.UNITS["box"]), highlight))
 
 
-## 手上和手推车。
+## 手上和手推车。推着车时手扶着车把，没有另外的「手上」（07 §2.1）。
 func carry(box: HBoxContainer) -> void:
 	UIKit.clear(box)
-	var h := inv().hand()
-	if not h.packages.is_empty():
-		box.add_child(view_for(h, "手上（%d 箱 / %d 包）" % [h.kind_limits["box"], h.kind_limits["pack"]]))
-	else:
-		box.add_child(view_for(h, "手上（%d 份）" % h.stack.max_height))
 	var c := cart()
-	if c != null:
-		var pv := PackageView.new().setup(c, "手推车（2 箱）")
-		pv.package_pressed.connect(_cart_menu)
-		pv.slot_pressed.connect(_cart_slot)
-		box.add_child(pv)
+	var pushing := s.player.pushing_cart and c != null
+	if not pushing:
+		var h := inv().hand()
+		if not h.packages.is_empty():
+			box.add_child(view_for(h, "手上（%d 箱 / %d 包）" % [h.kind_limits["box"], h.kind_limits["pack"]]))
+		else:
+			box.add_child(view_for(h, "手上（%d 份）" % h.stack.max_height))
+	if c == null:
+		return
+	if not cart_here():
+		box.add_child(UIKit.label("手推车停在%s。" % ("仓库" if s.player.cart_room == ShopSetup.WAREHOUSE else "店里"), 14, UIKit.MUTED))
+		return
+	var col := UIKit.vbox(4)
+	box.add_child(col)
+	var pv := PackageView.new().setup(c, "%s手推车（%d/%d）" % ["推着的" if pushing else "", c.package_units(), c.pkg_capacity])
+	pv.package_pressed.connect(_cart_menu)
+	pv.slot_pressed.connect(_cart_slot)
+	col.add_child(pv)
+	col.add_child(UIKit.button("停车（%d 秒）" % int(ActionAPI.CART_PUSH_SECONDS) if pushing else "推起来（%d 秒）" % int(ActionAPI.CART_PUSH_SECONDS),
+		func():
+			if s.player.pushing_cart:
+				park_cart()
+			else:
+				push_cart()
+			refresh.call(), 14))
+	box.add_child(_basket_view(c))
+
+
+## 车上的散货篓（07 §2.1）：像行囊一样只拿顶放顶。车停着时先走到车旁边再动。
+func _basket_view(c: Slot) -> StackView:
+	var v := StackView.new().setup(c, "散货篓 %d/%d" % [c.stack.height(), c.stack.max_height])
+	if host.has_method("_on_top"):
+		v.top_pressed.connect(func(id):
+			if walk_to_cart():
+				host._on_top(id))
+	if host.has_method("_on_strip"):
+		v.strip_pressed.connect(func(id, i):
+			if walk_to_cart():
+				host._on_strip(id, i))
+	if host.has_method("_on_peek"):
+		v.strip_peek.connect(func(id, i):
+			if walk_to_cart():
+				host._on_peek(id, i))
+	if host.has_method("_on_range"):
+		v.range_selected.connect(func(id, lo, hi, right):
+			if walk_to_cart():
+				host._on_range(id, lo, hi, right))
+	if host.has_method("_show_hand_pick"):
+		host._show_hand_pick(v)
+	v.slot_pressed.connect(_cart_slot)
+	return v
 
 
 func _cart_menu(slot_id: String, at: Vector2) -> void:
@@ -161,7 +261,7 @@ func menu_items(slot_id: String) -> Array:
 	if sl == null or sl.packages.is_empty():
 		return []
 	var p: Package = sl.packages[-1]
-	var h := inv().hand()
+	var h := api.carrier()
 	var in_hand := slot_id == h.id
 	var out: Array = []
 	if not in_hand:
@@ -179,8 +279,8 @@ func menu_items(slot_id: String) -> Array:
 		out.append(["隔着袋子看一眼", func(): look_at_pack(slot_id)])
 		if p.sealed:
 			out.append(["撕开袋子", func(): open_pack(slot_id)])
-		elif not in_hand:
-			out.append(["拿一条到手上", func(): item_from_pack(slot_id)])
+		elif not in_hand or h.mixes():
+			out.append(["拿一条到%s" % ("篓里" if h.mixes() else "手上"), func(): item_from_pack(slot_id)])
 	out.append(["写标签…", func(): label_dialog(p)])
 	return out
 
@@ -266,10 +366,11 @@ func open_pack(slot_id: String) -> void:
 
 
 func item_from_pack(slot_id: String) -> void:
-	if inv().hand().stack.is_full():
-		say.call("手上拿不下了。")
+	var h := api.carrier()
+	if h.stack.is_full():
+		say.call("篓里放不下了。" if h.mixes() else "手上拿不下了。")
 		return
-	if not inv().hand().packages.is_empty():
+	if not h.packages.is_empty() and not h.mixes():
 		say.call("手上抱着箱包，先放下。")
 		return
 	if api.take_from_open_pack(slot_id) != null:
@@ -301,13 +402,16 @@ func write_label(pkg_id: String, text: String) -> void:
 
 
 ## 点某格空处、手上抱着箱包时：能放就放上去；手上是包、那格放散货，就撕开倒上去（07 §2）。
-## 手上没抱箱包返回 false（交给场景按散货处理）。
+## 推着车时从车上卸：那格放得下箱包就卸箱包；放散货的格子篓里有货就先卸散货，篓空了才撕包倒（07 §2.1）。
+## 不是放箱包（手上没抱箱包，或该卸散货）返回 false，交给场景按散货处理。
 func put_from_hand(slot_id: String) -> bool:
-	var h := inv().hand()
+	var h := api.carrier()
 	if h.packages.is_empty() or slot_id == h.id:
 		return false
 	var sl: Slot = inv().slots[slot_id]
 	var p: Package = h.packages[-1]
+	if h.mixes() and h.stack.height() > 0 and sl.stack.max_height > 0 and not sl.can_hold(p):
+		return false
 	var top_box_open := not sl.packages.is_empty() and sl.packages[-1].is_box() and not sl.packages[-1].sealed
 	if sl.can_hold(p) or (sl.type == "Floor" and p.is_box()):
 		var r := api.put_package(slot_id)

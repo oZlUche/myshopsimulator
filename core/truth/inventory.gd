@@ -180,6 +180,19 @@ func hand() -> Slot:
 	return hd
 
 
+## 手推车上的散货篓最多放几条（07 §2.1）。像行囊一样是软的：只拿顶放顶，不玩抽取、不塌。
+const CART_BASKET := 10
+
+
+## 手推车（开店后才有，没有返回 null）。散货篓上限每次重设，老存档里存的 0 不作数。
+func cart() -> Slot:
+	var carts := slots_of_type("Cart")
+	if carts.is_empty():
+		return null
+	carts[0].stack.max_height = CART_BASKET
+	return carts[0]
+
+
 ## 安装设备 = 向场所注入一组槽位（01 §4.9）。返回设备实例 ID。pos 为摆放的格子（店面、仓库里用）。
 func install_equipment(def_id: String, location_id: String, pos := Vector2i(-1, -1)) -> String:
 	var def: Dictionary = DataDB.equipment().get(def_id, {})

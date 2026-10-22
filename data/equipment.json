@@ -42,6 +42,6 @@
 	},
 	"hand_cart": {
 		"name": "手推车", "phase": "shop", "price": 150, "resale_ratio": 0.4, "footprint": 0,
-		"provides_slots": [{"type": "Cart", "count": 1, "max_height": 0, "display_score": 0.0, "access_cost": 1.0, "pkg_capacity": 6}]
+		"provides_slots": [{"type": "Cart", "count": 1, "max_height": 10, "display_score": 0.0, "access_cost": 1.0, "pkg_capacity": 6}]
 	}
 }

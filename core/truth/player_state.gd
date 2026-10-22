@@ -13,6 +13,12 @@ var reputation: Variant = null
 var shop_opened_period: Variant = null
 var loans: Array = []
 var available: bool = true
+## 手推车（07 §2.1）：推着走时车就是「手上」；停着时停在 cart_room 的 cart_cell，车头朝 cart_facing。
+## cart_room 为空 = 还没停进哪间屋（老存档、刚开店），进屋时停在门口附近。
+var pushing_cart: bool = false
+var cart_room: String = ""
+var cart_cell: Vector2i = Vector2i(-1, -1)
+var cart_facing: String = "sw"
 
 
 func skill_level(skill_id: String) -> int:
@@ -24,6 +30,7 @@ func to_dict() -> Dictionary:
 		"cash": cash, "xp_pool": xp_pool, "skills": skills.duplicate(true), "phase": phase,
 		"reputation": reputation, "shop_opened_period": shop_opened_period,
 		"loans": loans.duplicate(true), "available": available,
+		"pushing_cart": pushing_cart, "cart_room": cart_room, "cart_cell": [cart_cell.x, cart_cell.y], "cart_facing": cart_facing,
 	}
 
 
@@ -39,4 +46,9 @@ static func from_dict(d: Dictionary) -> PlayerState:
 	p.shop_opened_period = d.get("shop_opened_period", null)
 	p.loans = d.get("loans", [])
 	p.available = bool(d.get("available", true))
+	p.pushing_cart = bool(d.get("pushing_cart", false))
+	p.cart_room = str(d.get("cart_room", ""))
+	var cc: Array = d.get("cart_cell", [-1, -1])
+	p.cart_cell = Vector2i(int(cc[0]), int(cc[1]))
+	p.cart_facing = str(d.get("cart_facing", "sw"))
 	return p

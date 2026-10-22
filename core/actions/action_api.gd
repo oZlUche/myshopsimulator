@@ -38,7 +38,11 @@ func handle_seconds(base: float) -> float:
 
 
 ## 走路速度倍率（07 §2）：抱着箱子 ×0.6（【搬运】Lv4 ×0.75），抱两箱 ×0.5；空手、拿散货、拿包不变。
+## 推着手推车 ×0.8（Lv4 ×0.9），车上装多少都一样（07 §2.1）。
 func walk_speed_mult() -> float:
+	var mods := SkillSystem.carry_mods(s.player)
+	if s.player.pushing_cart and s.inventory.cart() != null:
+		return float(mods["cart_walk_mult"])
 	var h := s.inventory.hand()
 	var boxes := 0
 	for p in h.packages:
@@ -46,7 +50,61 @@ func walk_speed_mult() -> float:
 			boxes += 1
 	if boxes >= 2:
 		return 0.5
-	return float(SkillSystem.carry_mods(s.player)["box_walk_mult"]) if boxes == 1 else 1.0
+	return float(mods["box_walk_mult"]) if boxes == 1 else 1.0
+
+
+## 现在东西拿到哪儿（07 §2.1）：推着手推车时是车（车板放箱包、散货进散货篓），否则是手上。
+## 拿、放、交货都只认它。推车时手扶着车把，没有另外的「手上」。
+func carrier() -> Slot:
+	if s.player.pushing_cart:
+		var c := s.inventory.cart()
+		if c != null:
+			return c
+	return s.inventory.hand()
+
+
+## 推起 / 停下手推车的耗时（秒，07 §2.1）
+const CART_PUSH_SECONDS := 2.0
+
+
+## 推起停着的手推车（07 §2.1）：手上的东西顺手放到车上（箱包上车板、散货进篓），放不下就推不起来。
+## 走到车跟前由场景负责。返回 {ok, reason, moved}。
+func push_cart() -> Dictionary:
+	var c := s.inventory.cart()
+	if c == null:
+		return {"ok": false, "reason": "没有手推车", "moved": 0}
+	if s.player.pushing_cart:
+		return {"ok": false, "reason": "已经推着了", "moved": 0}
+	var h := s.inventory.hand()
+	var units := c.package_units()
+	for p in h.packages:
+		units += p.units()
+	if units > c.pkg_capacity or c.stack.height() + h.stack.height() > c.stack.max_height:
+		return {"ok": false, "reason": "手上的东西车上放不下，先放到别处", "moved": 0}
+	var moved := h.packages.size() + h.stack.height()
+	for p in h.packages:
+		c.packages.append(p)
+	h.packages.clear()
+	for it in h.stack.items:
+		place_on_top(it, c.id)
+	h.stack.items.clear()
+	s.player.pushing_cart = true
+	return {"ok": true, "reason": "", "moved": moved}
+
+
+## 把推着的车停在 loc 的 cell，车头朝 facing（07 §2.1）。门口、收银台后面不能停。返回 {ok, reason}。
+func park_cart(loc: String, cell: Vector2i, facing: String = "sw") -> Dictionary:
+	if not s.player.pushing_cart:
+		return {"ok": false, "reason": "没在推车"}
+	s.player.pushing_cart = false
+	var why := RoomGrid.can_park(s.inventory, loc, cell)
+	if why != "":
+		s.player.pushing_cart = true
+		return {"ok": false, "reason": why}
+	s.player.cart_room = loc
+	s.player.cart_cell = cell
+	s.player.cart_facing = facing
+	return {"ok": true, "reason": ""}
 
 
 func _xp(amount: float) -> void:
@@ -93,7 +151,7 @@ func purchase(sku_id: String, qty: int, unit_price: float, _actor: String = "pla
 
 func place_on_top(item: ScarfItem, slot_id: String, _actor: String = "player") -> bool:
 	var sl := _slot(slot_id)
-	if sl == null or sl.stack.is_full() or not sl.packages.is_empty():
+	if sl == null or sl.stack.is_full() or (not sl.packages.is_empty() and not sl.mixes()):
 		return false
 	item.reset_pull()
 	sl.stack.settle()
@@ -185,9 +243,9 @@ func take_top(slot_id: String, _actor: String = "player") -> ScarfItem:
 ## 从一个堆顶拿 count 份到手上（框选批量拆顶就是单份拆顶重复 count 次，03 §2.6），拿到手上满为止。
 ## 返回最后拿起的那份（现在在手上最上面）；一份都没拿到返回 null。散货上限看【搬运】（02 §2.10）。
 func take_top_to_hand(slot_id: String, count: int = 1) -> ScarfItem:
-	var h := s.inventory.hand()
+	var h := carrier()
 	var last: ScarfItem = null
-	if slot_id == h.id or not h.packages.is_empty():
+	if slot_id == h.id or (not h.packages.is_empty() and not h.mixes()):
 		return null
 	for i in count:
 		if h.stack.is_full():
@@ -200,10 +258,10 @@ func take_top_to_hand(slot_id: String, count: int = 1) -> ScarfItem:
 	return last
 
 
-## 手上还能拿几条散货（抱着箱包时为 0）。
+## 手上（推车时是散货篓）还能拿几条散货；抱着箱包时为 0。
 func hand_room() -> int:
-	var h := s.inventory.hand()
-	return 0 if not h.packages.is_empty() else h.stack.max_height - h.stack.height()
+	var h := carrier()
+	return 0 if not h.packages.is_empty() and not h.mixes() else h.stack.max_height - h.stack.height()
 
 
 ## 整块抽取（03 §2.6）：把 [lo, hi] 这一段当一块从堆里抽出来，按原顺序进手上（块最上面那份在手上最上面）。
@@ -213,7 +271,7 @@ func hand_room() -> int:
 func pull_block(slot_id: String, lo: int, hi: int, pull_input: Dictionary = CAREFUL_PULL, actor_profile: Dictionary = {}) -> Dictionary:
 	var out := {"items": [], "item": null, "collapsed": false, "displaced": false, "d": 0.0}
 	var sl := _slot(slot_id)
-	var h := s.inventory.hand()
+	var h := carrier()
 	if sl == null or slot_id == h.id or lo < 0 or hi < lo or hi >= sl.stack.height():
 		return out
 	var n := hi - lo + 1
@@ -261,7 +319,7 @@ func peek_range(slot_id: String, lo: int, hi: int, _actor: String = "player") ->
 ## 把手上第 lo 份起的 count 份按原顺序依次放到某堆顶（03 §2.6 手上框选后批量放下）；lo < 0 表示最上面 count 份。
 ## 放不下的留在手上。返回放下了几份（每份 TAKE_TOP_SECONDS，由场景花）。
 func place_from_carrier(slot_id: String, count: int, lo: int = -1) -> int:
-	var h := s.inventory.hand()
+	var h := carrier()
 	var dst := _slot(slot_id)
 	if dst == null or slot_id == h.id or count <= 0:
 		return 0
@@ -273,7 +331,7 @@ func place_from_carrier(slot_id: String, count: int, lo: int = -1) -> int:
 		moving.append(h.stack.items[i])
 	var placed := 0
 	for it in moving:
-		if dst.stack.is_full() or not dst.packages.is_empty():
+		if dst.stack.is_full() or (not dst.packages.is_empty() and not dst.mixes()):
 			break
 		h.stack.items.erase(it)
 		place_on_top(it, slot_id)
@@ -403,13 +461,17 @@ const MOVE_PACKAGE_SECONDS := 2.0
 ## 把某格最上面那个箱 / 包抱到手上。手上得没拿着散货，而且抱得下（箱、包不混拿，各按【搬运】的上限）。返回 {ok, reason, package}。
 func take_package(slot_id: String) -> Dictionary:
 	var sl := _slot(slot_id)
-	var h := s.inventory.hand()
+	var h := carrier()
 	if sl == null or sl.packages.is_empty():
 		return {"ok": false, "reason": "这里没有箱子或包"}
-	if h.stack.height() > 0:
+	if slot_id == h.id:
+		return {"ok": false, "reason": "已经在车上了"}
+	if h.stack.height() > 0 and not h.mixes():
 		return {"ok": false, "reason": "手上拿着散货，先放下"}
 	var p: Package = sl.packages[-1]
 	if not h.can_hold(p):
+		if h.mixes():
+			return {"ok": false, "reason": "车上放不下了，一车最多 %d 箱，或 1 箱 + 3 包，或 %d 包" % [h.pkg_capacity / int(Package.UNITS["box"]), h.pkg_capacity]}
 		return {"ok": false, "reason": "抱不下了，一次只能抱 %d 箱或 %d 包，不能混着抱" % [h.kind_limits["box"], h.kind_limits["pack"]]}
 	sl.packages.pop_back()
 	h.packages.append(p)
@@ -419,7 +481,7 @@ func take_package(slot_id: String) -> Dictionary:
 ## 把手上最上面那个箱 / 包放到某格顶上（地堆最高 4 箱，07 §2）。返回 {ok, reason}。
 func put_package(slot_id: String) -> Dictionary:
 	var sl := _slot(slot_id)
-	var h := s.inventory.hand()
+	var h := carrier()
 	if sl == null or h.packages.is_empty():
 		return {"ok": false, "reason": "手上没有箱子或包"}
 	var p: Package = h.packages[-1]
@@ -478,7 +540,7 @@ func look_at_pack(pack: Package) -> Dictionary:
 ## 从某格（含手上）最上面那个已拆开的箱里拿出最上面那包，抱到手上。返回 {ok, reason, package}。
 func take_pack_from_box(slot_id: String) -> Dictionary:
 	var sl := _slot(slot_id)
-	var h := s.inventory.hand()
+	var h := carrier()
 	if sl == null or sl.packages.is_empty() or not sl.packages[-1].is_box():
 		return {"ok": false, "reason": "最上面不是箱子"}
 	var box: Package = sl.packages[-1]
@@ -486,7 +548,7 @@ func take_pack_from_box(slot_id: String) -> Dictionary:
 		return {"ok": false, "reason": "箱子还封着，先拆箱"}
 	if box.packs.is_empty():
 		return {"ok": false, "reason": "箱子空了"}
-	if h.stack.height() > 0:
+	if h.stack.height() > 0 and not h.mixes():
 		return {"ok": false, "reason": "手上拿着散货，先放下"}
 	var pack: Package = box.packs[-1]
 	# 箱子在手上时，拿出一包后手上是"空箱 + 一包"，超了；这种情况先把箱子放下
@@ -500,7 +562,7 @@ func take_pack_from_box(slot_id: String) -> Dictionary:
 ## 把一包放回某格最上面那个已拆开的箱里。
 func put_pack_into_box(slot_id: String) -> Dictionary:
 	var sl := _slot(slot_id)
-	var h := s.inventory.hand()
+	var h := carrier()
 	if sl == null or sl.packages.is_empty() or not sl.packages[-1].is_box() or sl.packages[-1].sealed:
 		return {"ok": false, "reason": "这里没有打开的箱子"}
 	if h.packages.is_empty() or h.packages[-1].is_box():
@@ -534,13 +596,13 @@ func unpack_to(src_slot: String, dst_slot: String) -> Dictionary:
 	return {"ok": moved > 0, "reason": "" if moved > 0 else "那堆满了", "moved": moved, "left": pack.items.size()}
 
 
-## 从开口包里拿最上面那条到手上（包得是开着的，手上不能抱着别的箱包）。
+## 从开口包里拿最上面那条到手上（包得是开着的，手上不能抱着别的箱包）。推车时进散货篓，车上的开口包也能拿。
 func take_from_open_pack(slot_id: String) -> ScarfItem:
 	var sl := _slot(slot_id)
-	var h := s.inventory.hand()
+	var h := carrier()
 	if sl == null or sl.packages.is_empty() or sl.packages[-1].is_box() or sl.packages[-1].sealed:
 		return null
-	if h.stack.is_full() or not h.packages.is_empty():
+	if h.stack.is_full() or (not h.packages.is_empty() and not h.mixes()):
 		return null
 	var pack: Package = sl.packages[-1]
 	var it: ScarfItem = pack.items.pop_back()

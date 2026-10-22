@@ -25,6 +25,7 @@ func _ready() -> void:
 	session.self_served.connect(_on_self_served)
 	_build()
 	ops = RoomOps.new(s, ShopSetup.SHOP, _view, self, _say, _spend, _refresh_all)
+	ops.ensure_cart()
 	var from_warehouse := Game.arrive_from == "warehouse"
 	var start := s.inventory.room_cell(ShopSetup.SHOP, "door") if from_warehouse else ShopSetup.stand_cell(s.inventory)
 	ops.player_cell = start
@@ -34,7 +35,7 @@ func _ready() -> void:
 	if s.clock.time_of_period >= 1.0:
 		_close_shop_time()
 	elif from_warehouse:
-		_say("推着车回到店里。车停在门口，点手推车把东西搬下来。")
+		_say("推着车回到店里。点某格空处就从车上卸；讲价、交货时车会原地停下。" if s.player.pushing_cart else "回到店里。")
 	else:
 		_say("到店里了。开门前时间不走：点货柜走过去，把包拿起来，再点货架的空处，撕开倒上去。")
 		_say("客人只看得到货架、橱窗和模特上的货；货柜里的客人看不到。点「摆设备」可以买、挪、卖设备。")
@@ -62,7 +63,6 @@ func _build() -> void:
 	_view.custom_minimum_size = Vector2(0, 300)
 	left.add_child(_view)
 	_area = _view
-	_view.cart_slot = null
 	left.add_child(UIKit.label("近景（点地上或设备走过去；箱包点最上面那个弹出能做的事，点空处把手上的放下）", 13, UIKit.MUTED))
 	var scroll := ScrollContainer.new()
 	scroll.custom_minimum_size = Vector2(0, 196)
@@ -171,8 +171,6 @@ func _refresh_slots() -> void:
 	session.refresh_layout()
 	ops.closeup(_closeup, _highlight_item())
 	ops.carry(_carry)
-	_view.cart_slot = ops.cart()
-	_view.cart_g = ops.cart_foot() if ops.cart() != null else Vector2(-99, -99)
 	_update_marks()
 	if ops.layout_mode:
 		ops.layout_panel(_layout_box, _toggle_layout)
@@ -222,31 +220,34 @@ func _on_cell(c: Vector2i) -> void:
 
 
 func _on_slot(slot_id: String) -> void:
-	if ops.put_from_hand(slot_id):
+	if _hand_pick.is_empty() and ops.put_from_hand(slot_id):
 		_refresh_all()
 		return
 	super._on_slot(slot_id)
 
 
 func _on_top(slot_id: String) -> void:
-	if not _hand().packages.is_empty() and slot_id != _hand().id:
+	if not _hand().packages.is_empty() and not _hand().mixes() and slot_id != _hand().id:
 		_say("手上抱着箱包，先放下才能拿散货。")
 		return
 	super._on_top(slot_id)
 
 
 func _on_strip(slot_id: String, index: int) -> void:
-	if not _hand().packages.is_empty() and slot_id != _hand().id:
+	if not _hand().packages.is_empty() and not _hand().mixes() and slot_id != _hand().id:
 		_say("手上抱着箱包，先放下才能拿散货。")
 		return
 	super._on_strip(slot_id, index)
 
 
 ## 讲价、交货都在收银台：人不在就先走回去（按格子花时间，客人那边时间照走）。
+## 推着车的话车先原地停下，回来再推（07 §2.1）。
 func _back_to_counter() -> bool:
 	var stand := ShopSetup.stand_cell(s.inventory)
 	if ops.player_cell == stand:
 		return true
+	if s.player.pushing_cart and not ops.park_cart(true):
+		return false
 	return ops.walk_to(stand, true)
 
 
@@ -262,14 +263,16 @@ func _start_haggle(v: Dictionary) -> void:
 	super._start_haggle(v)
 
 
-func _deliver(v: Dictionary) -> void:
+## 推着车过来交货：客人要的那份在车上也算拿着（07 §2.1），车停下后从车上拿给他。
+func _deliver(v: Dictionary, from: Slot = null) -> void:
+	var src: Slot = from if from != null else _hand()
 	if not _back_to_counter():
 		return
 	if v["state"] != "waiting_item":
 		_say("#%d 已经走了。" % _view.visitor_numbers.get(v["customer"].id, 0))
 		_refresh_all()
 		return
-	super._deliver(v)
+	super._deliver(v, src)
 
 
 # ---------- 摆设备 ----------
@@ -327,6 +330,9 @@ func _go_warehouse() -> void:
 	if phase == Phase.OPEN:
 		session.close()
 	ShopSession.pass_time(s, ShopSetup.TRIP_SECONDS)
+	# 推着车走，车上的东西随车到仓库；没推就留在店里（07 §2.1）
+	if s.player.pushing_cart:
+		s.player.cart_room = ShopSetup.WAREHOUSE
 	_leave()
 	Game.arrive_from = "shop"
 	Game.goto("warehouse")
@@ -339,6 +345,8 @@ func _pack_up(_sold_out := false) -> void:
 	if phase == Phase.OPEN:
 		session.close()
 	phase = Phase.CLOSED
+	if s.player.pushing_cart:
+		ops.park_cart(true)
 	_leave()
 	Game.end_period({"shop": true})
 

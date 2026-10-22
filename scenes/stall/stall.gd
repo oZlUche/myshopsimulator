@@ -279,8 +279,9 @@ func _refresh_visitors() -> void:
 
 
 # ---------- 摆货 ----------
+## 东西拿到哪儿：手上，店里推着手推车时是车（07 §2.1）。
 func _hand() -> Slot:
-	return s.inventory.hand()
+	return api.carrier()
 
 
 ## 点堆顶：从顶部拿一份到手上（03 §2.0）。不判定、不会塌，固定耗时，连续点就一份份往下拿。
@@ -352,7 +353,7 @@ func _on_slot(slot_id: String) -> void:
 
 ## 手上框选的那段画出来（只有手上那一格）。
 func _show_hand_pick(v: StackView) -> void:
-	if v.slot.type == "Hand" and not _hand_pick.is_empty() and int(_hand_pick[1]) < v.slot.stack.height():
+	if v.slot.id == _hand().id and not _hand_pick.is_empty() and int(_hand_pick[1]) < v.slot.stack.height():
 		v.sel_lo = _hand_pick[0]
 		v.sel_hi = _hand_pick[1]
 
@@ -376,7 +377,7 @@ func _on_range(slot_id: String, lo: int, hi: int, right: bool) -> void:
 		_spend(2.0 * seen.size())
 		_refresh_slots()
 		return
-	if not h.packages.is_empty():
+	if not h.packages.is_empty() and not h.mixes():
 		_say("手上抱着箱包，先放下才能拿散货。")
 		return
 	var room := api.hand_room()
@@ -498,9 +499,10 @@ func _on_visitor_clicked(v: Dictionary) -> void:
 
 
 ## 把手上的货递给等货的客人（01 §6.4）。
-func _deliver(v: Dictionary) -> void:
+## from：从哪儿拿货交（默认手上；店里推着车过来时是车上，07 §2.1）。
+func _deliver(v: Dictionary, from: Slot = null) -> void:
 	var num: int = _area.visitor_numbers.get(v["customer"].id, 0)
-	var r := session.deliver(v, _hand())
+	var r := session.deliver(v, from if from != null else _hand())
 	match r["result"]:
 		"empty":
 			_reask(v, num)

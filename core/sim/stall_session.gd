@@ -361,7 +361,7 @@ func _pick(v: Dictionary, exclude: Array = []) -> Dictionary:
 
 ## 客人看中的那份货现在在哪：{slot_id, index}；已不在摊位上（也不在你手上）则为空。
 func locate(item_id: String) -> Dictionary:
-	for sl in display_slots() + s.inventory.slots_of_type("Hand"):
+	for sl in display_slots() + s.inventory.slots_of_type("Hand") + s.inventory.slots_of_type("Cart"):
 		var idx := sl.stack.index_of(item_id)
 		if idx >= 0:
 			return {"slot_id": sl.id, "index": idx}
@@ -596,10 +596,10 @@ func reask(v: Dictionary) -> Dictionary:
 	return out
 
 
-## 摊位（含地上）、手上、行囊里一共还有几份货。
+## 摊位（含地上）、手上（含手推车的散货篓）、行囊里一共还有几份货。
 func goods_left() -> int:
 	var n := 0
-	for sl in display_slots() + storage_slots() + s.inventory.slots_of_type("Hand"):
+	for sl in display_slots() + storage_slots() + s.inventory.slots_of_type("Hand") + s.inventory.slots_of_type("Cart"):
 		n += sl.stack.height() + sl.stack.collapsed_pile.size()
 	return n
 
