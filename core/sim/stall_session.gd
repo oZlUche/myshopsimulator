@@ -39,7 +39,7 @@ var _fit_acc := 0.0
 ## 计时器到点了：下一位过路客按摊上实际摆着的货生成
 var _fit_pending := false
 var _returning: Array[CustomerProfile] = []
-## 景气对客流的修正 0.7 + 0.3·G（09 §3.3），一旬里不变
+## 景气和节拍对客流的修正 (0.7 + 0.3·G) · B（09 §3.3、§1.8），一旬里不变
 var _traffic_mult := 1.0
 
 
@@ -53,7 +53,8 @@ func _init(state: GameState, stall_x: float, returning: Variant = null) -> void:
 		_returning = s.customers.roll_returning(s.rng)
 	else:
 		_returning.assign(returning)
-	_traffic_mult = 0.7 + 0.3 * float(s.econ_now()["G"])
+	var econ := s.econ_now()
+	_traffic_mult = (0.7 + 0.3 * float(econ["G"])) * float(econ.get("rhythm_mult_indoor" if indoor() else "rhythm_mult", 1.0))
 
 
 ## 这一旬还没回来的常客（店面和仓库来回跑时要接着用，别让同一个常客回来两次）。
@@ -69,6 +70,11 @@ func display_slots() -> Array[Slot]:
 
 func is_display(sl: Slot) -> bool:
 	return sl.type == "StallTable"
+
+
+## 室内（店面）：雨天对客流的影响减半（09 §1.8）。摆摊在街上。
+func indoor() -> bool:
+	return false
 
 
 ## 找货时还会翻的地方（自动模拟用）：摊位上找不到就去行囊里。

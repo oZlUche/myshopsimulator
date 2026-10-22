@@ -50,6 +50,9 @@ func _ready() -> void:
 	_build()
 	_area.visitor_clicked.connect(_on_visitor_clicked)
 	_say("找好位置了。先把行囊里的货摆到摊位上，然后开张。时间还没开始走。")
+	var weather := s.economy.weather_notice(s.clock.period)
+	if weather != "":
+		_say("今天" + weather + "。")
 	_say("点堆顶那份的顶面：从顶部拿一份到手上，不会塌；点下面某份的侧面：从中间抽，抽不好上面会塌。再点某一格的空处，把手上的货放到那堆顶上。")
 	_say("按住拉框可以一次选好几份：框到堆顶就一份份拆下来，没框到堆顶就整块抽（块越厚越容易塌）；右键拉框一起翻看；在手上拉框选好再点某格空处，一起放下。")
 	_refresh_all()

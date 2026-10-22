@@ -52,6 +52,29 @@ const RENT_G := 0.25
 const RENT_WINDOW := 12
 ## 拖账倾向 κ = κ0·(1 + 1.5·max(0, −g))（09 §1.7）
 const CREDIT_RISK_G := 1.5
+## 节拍层 B（09 §1.8）：季节需求 · 日历事件 · 突发天气，固定部分年均归一到 1，只乘客流和购物意向
+const SEASON_D_AMP := 0.35
+const SEASON_D_PEAK := 32
+const B_MIN := 0.6
+const B_MAX := 1.6
+## 日历事件（按年内旬号 q = 1..36）：{name, q: {q: [客流倍率, 意向加成]}}；集市日另算（每月下旬）
+const CALENDAR := [
+	{"name": "年关抢购", "q": {34: [1.25, 0.10], 35: [1.45, 0.15], 36: [1.6, 0.20]}},
+	{"name": "年初清淡", "q": {1: [0.6, -0.05], 2: [0.8, -0.05]}},
+	{"name": "开春集", "q": {4: [1.3, 0.05]}},
+	{"name": "长假", "q": {19: [1.3, 0.05], 20: [1.2, 0.05]}},
+	{"name": "丰收季", "q": {22: [1.1, 0.05], 23: [1.1, 0.05], 24: [1.1, 0.05], 25: [1.1, 0.05], 26: [1.1, 0.05], 27: [1.1, 0.05]}},
+]
+const MARKET_DAY := [1.15, 0.0]
+## 突发天气：触发的年内旬号范围、每旬概率、客流倍率、意向加成、持续旬数（线性衰减到 1）；indoor = 店里受影响的比例
+const WEATHER := {
+	"cold": {"name": "突然降温", "tip": "突然冷了，来买围巾的人多", "tip_later": "还冷着，来买围巾的人还多", "q": [[19, 36], [1, 3]], "p": 0.10, "mult": 1.3, "intent": 0.1, "duration": 2, "indoor": 1.0},
+	"warm": {"name": "冬天回暖", "tip": "回暖了，没什么人想买围巾", "tip_later": "还暖和着，买围巾的人少", "q": [[28, 36]], "p": 0.06, "mult": 0.85, "intent": 0.0, "duration": 2, "indoor": 1.0},
+	"rain": {"name": "连着下雨", "tip": "连着下雨，街上人少（店里好一点）", "q": [[10, 18]], "p": 0.12, "mult": 0.75, "intent": 0.0, "duration": 1, "indoor": 0.5},
+	"sand": {"name": "大风沙", "tip": "刮大风沙，出门的人少，出来的更想买", "q": [[1, 9]], "p": 0.05, "mult": 0.8, "intent": 0.05, "duration": 1, "indoor": 1.0},
+}
+## 年关抢购从年内第 34 旬（12 月上旬）开始
+const YEAR_END_RUSH_Q := 34
 
 ## 年度基准（每 36 旬随机调整一次）。material_bias 为对季节基线的偏移。
 var base: Dictionary = {
@@ -62,6 +85,8 @@ var base: Dictionary = {
 }
 ## 每年一条：{"consumption_level": Δ}
 var base_delta_history: Array = []
+## 节拍层的突发天气（09 §1.8）：[{kind, start, duration, traffic_mult, intent_add}]，同 material_events 的形式
+var rhythm_events: Array = []
 ## 最近旬的观测向量（最新在末尾）：{"price_ratio": 成交价/(标价·π) - 1, "sales": 成交件数, "traffic": 过路客数}
 var observations: Array = []
 
@@ -181,7 +206,163 @@ func effective(period: int) -> Dictionary:
 		"material_cost_mult": cost_mult,
 		"credit_risk": float(base["wholesale_credit_risk"]) * (1.0 + CREDIT_RISK_G * maxf(0.0, -g)),
 		"rent_index_target": rent_index_target,
+		"rhythm_mult": rhythm(period, false),
+		"rhythm_mult_indoor": rhythm(period, true),
+		"rhythm_intent_add": rhythm_intent(period),
+		"calendar_events": calendar_names(period),
+		"weather_events": weather_names(period),
 	}
+
+
+# ---------- 节拍层 B（09 §1.8） ----------
+## 年内旬号 q = 1..36。
+static func year_q(period: int) -> int:
+	return (period - 1) % Clock.PERIODS_PER_YEAR + 1
+
+
+## 季节需求：峰在 11 月中（q = 32）1.35，谷在 5 月中 0.65，一年均值 1。
+static func season_demand(q: int) -> float:
+	return 1.0 + SEASON_D_AMP * cos(TAU * float(q - SEASON_D_PEAK) / Clock.PERIODS_PER_YEAR)
+
+
+## 日历事件在第 q 旬的 [客流倍率, 意向加成, 事件名列表]（固定、按年循环）。
+static func calendar(q: int) -> Array:
+	var mult := 1.0
+	var intent := 0.0
+	var names: Array = []
+	for ev in CALENDAR:
+		if ev["q"].has(q):
+			mult *= float(ev["q"][q][0])
+			intent += float(ev["q"][q][1])
+			names.append(ev["name"])
+	if q % Clock.PERIODS_PER_MONTH == 0:
+		mult *= float(MARKET_DAY[0])
+		intent += float(MARKET_DAY[1])
+		names.append("集市日")
+	return [mult, intent, names]
+
+
+static var _rhythm_norm := 0.0
+
+
+## 归一化 Z（只算一次）：让夹限后的固定部分 clamp(季节需求 × 日历 / Z) 一年 36 旬均值正好 1。
+## 不夹限的均值是 1.119，但年关最后两旬会顶到 1.6，直接除会让年均掉到 0.985，所以二分找 Z（≈ 1.099）。
+static func rhythm_norm() -> float:
+	if _rhythm_norm <= 0.0:
+		var lo := 0.5
+		var hi := 2.0
+		for i in 50:
+			var z := (lo + hi) / 2.0
+			var sum := 0.0
+			for q in range(1, Clock.PERIODS_PER_YEAR + 1):
+				sum += clampf(season_demand(q) * float(calendar(q)[0]) / z, B_MIN, B_MAX)
+			if sum / Clock.PERIODS_PER_YEAR > 1.0:
+				lo = z
+			else:
+				hi = z
+		_rhythm_norm = (lo + hi) / 2.0
+	return _rhythm_norm
+
+
+## 突发天气在这一旬的 [客流倍率, 意向加成]：同类不叠，不同类相乘；按开始后的旬数线性衰减到 1。
+func weather(period: int, indoor := false) -> Array:
+	var mult := 1.0
+	var intent := 0.0
+	for e in rhythm_events:
+		var age := period - int(e["start"])
+		var dur := int(e["duration"])
+		if age < 0 or age >= dur:
+			continue
+		var f := 1.0 - float(age) / dur
+		var share := float(WEATHER.get(e["kind"], {}).get("indoor", 1.0)) if indoor else 1.0
+		mult *= 1.0 + (float(e["traffic_mult"]) - 1.0) * f * share
+		intent += float(e["intent_add"]) * f
+	return [mult, intent]
+
+
+## B(t)：乘在过路客 / 进店密度上（09 §1.8）。indoor = 店面（雨天影响减半）。
+func rhythm(period: int, indoor := false) -> float:
+	var q := year_q(period)
+	var fixed := season_demand(q) * float(calendar(q)[0])
+	return clampf(fixed * float(weather(period, indoor)[0]) / rhythm_norm(), B_MIN, B_MAX)
+
+
+## 购物意向加成：日历 + 天气。
+func rhythm_intent(period: int) -> float:
+	return float(calendar(year_q(period))[1]) + float(weather(period)[1])
+
+
+static func calendar_names(period: int) -> Array:
+	return calendar(year_q(period))[2]
+
+
+func weather_names(period: int) -> Array:
+	var out: Array = []
+	for e in rhythm_events:
+		var age := period - int(e["start"])
+		if age >= 0 and age < int(e["duration"]):
+			out.append(WEATHER.get(e["kind"], {}).get("name", e["kind"]))
+	return out
+
+
+## 当旬天气提示（09 §1.8：天气只在发生当旬告诉玩家）。没有天气返回 ""。
+func weather_notice(period: int) -> String:
+	var tips: Array = []
+	for e in rhythm_events:
+		var age := period - int(e["start"])
+		if age >= 0 and age < int(e["duration"]):
+			var w: Dictionary = WEATHER.get(e["kind"], {})
+			tips.append(str(w.get("tip_later" if age > 0 and w.has("tip_later") else "tip", w.get("name", e["kind"]))))
+	return "；".join(tips)
+
+
+## 规划页的日历（固定、公开）：本月和下月的事件、离年关还有几旬、本旬行情冷热。
+static func calendar_outlook(period: int) -> String:
+	var parts: Array = []
+	var month_start := period - (period - 1) % Clock.PERIODS_PER_MONTH
+	for m in 2:
+		var first := month_start + m * Clock.PERIODS_PER_MONTH
+		var by_name := {}
+		for i in Clock.PERIODS_PER_MONTH:
+			if first + i < period:
+				continue
+			for n in calendar_names(first + i):
+				if not by_name.has(n):
+					by_name[n] = []
+				by_name[n].append(["上", "中", "下"][i])
+		var items: Array = []
+		for n in by_name:
+			items.append("%s（%s旬）" % [n, "、".join(by_name[n])])
+		parts.append("%s %d月：%s" % [["本月", "下月"][m], Clock.month_of(first), "、".join(items) if not items.is_empty() else "没什么事"])
+	var q := year_q(period)
+	if q >= YEAR_END_RUSH_Q:
+		parts.append("年关抢购中")
+	else:
+		parts.append("再过 %d 旬年关" % (YEAR_END_RUSH_Q - q))
+	var fixed := clampf(season_demand(q) * float(calendar(q)[0]) / rhythm_norm(), B_MIN, B_MAX)
+	var word := "很旺" if fixed >= 1.3 else ("偏旺" if fixed >= 1.1 else ("平常" if fixed >= 0.9 else ("偏淡" if fixed >= 0.7 else "很淡")))
+	parts.append("本旬围巾行情%s" % word)
+	return "　".join(parts)
+
+
+## 新的一旬掷一次突发天气：在季节范围内、同类没在生效，就按概率触发。
+func _roll_weather(period: int, rng: GameRng) -> void:
+	var alive: Array = []
+	for e in rhythm_events:
+		if period - int(e["start"]) < int(e["duration"]):
+			alive.append(e)
+	rhythm_events = alive
+	var q := year_q(period)
+	for kind in WEATHER:
+		var w: Dictionary = WEATHER[kind]
+		var in_season := false
+		for r in w["q"]:
+			in_season = in_season or (q >= int(r[0]) and q <= int(r[1]))
+		if not in_season or rhythm_events.any(func(e): return e["kind"] == kind):
+			continue
+		if rng.chance(float(w["p"])):
+			rhythm_events.append({"kind": kind, "start": period, "duration": int(w["duration"]),
+				"traffic_mult": float(w["mult"]), "intent_add": float(w["intent"])})
 
 
 ## 基准利率（年化）r = clamp(r0 + e_r·g + 0.5·(年化通胀 − 3%), 2%, 12%)（09 §1.3）。
@@ -221,6 +402,7 @@ func period_step(period: int, g_prev: float, rng: GameRng) -> void:
 		var mats: Array = DataDB.attributes()["materials"].keys()
 		material_events.append({"material": rng.pick(mats), "boost": SHOCK_EVENT_SIZE * (1.0 if rng.chance(0.5) else -1.0),
 			"start": period, "duration": SHOCK_EVENT_LEN})
+	_roll_weather(period, rng)
 	g_history.append(g_prev)
 	while g_history.size() > RENT_WINDOW:
 		g_history.pop_front()
@@ -270,6 +452,7 @@ func to_dict() -> Dictionary:
 		"fuel_index_rw": fuel_index_rw,
 		"material_shock": material_shock.duplicate(),
 		"material_events": material_events.duplicate(true),
+		"rhythm_events": rhythm_events.duplicate(true),
 		"g_history": g_history.duplicate(),
 		"rent_index_target": rent_index_target,
 		"policy": policy.duplicate(true),
@@ -289,6 +472,7 @@ static func from_dict(d: Dictionary) -> EconomyState:
 	e.fuel_index_rw = float(d.get("fuel_index_rw", 1.0))
 	e.material_shock = d.get("material_shock", {})
 	e.material_events = d.get("material_events", [])
+	e.rhythm_events = d.get("rhythm_events", [])
 	e.g_history = d.get("g_history", [])
 	e.rent_index_target = float(d.get("rent_index_target", e.price_level))
 	var pol: Dictionary = d.get("policy", {})

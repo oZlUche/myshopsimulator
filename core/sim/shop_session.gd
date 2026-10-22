@@ -42,6 +42,10 @@ func is_display(sl: Slot) -> bool:
 	return sl.type == "ShopDisplay" and sl.location_id == LOC
 
 
+func indoor() -> bool:
+	return true
+
+
 func storage_slots() -> Array[Slot]:
 	return s.inventory.slots_in(LOC, "ShopBackroom")
 
