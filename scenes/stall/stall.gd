@@ -32,6 +32,8 @@ var _visitor_rows: Dictionary = {}   # 客人 id → 右侧名单里的那一行
 var _bundle_spin: SpinBox
 ## 卖光后自动收摊的倒计时（秒，实时）；<0 表示没在倒数
 var _sold_out_timer := -1.0
+## 再问客人时【强化记忆】想起来的那份（加亮）：{visitor, item_id}
+var _reask_mark: Dictionary = {}
 var _table_empty_hinted := false
 
 
@@ -187,10 +189,17 @@ func _refresh_header() -> void:
 	_cash.text = "现金 %.1f" % s.player.cash
 
 
-func _refresh_slots() -> void:
-	var highlight := ""
+## 加亮哪份货：正在讲价的那份；没在讲价时是再问客人后想起来的那份。
+func _highlight_item() -> String:
 	if not _haggle_visitor.is_empty():
-		highlight = _haggle_visitor["item_id"]
+		return _haggle_visitor.get("item_id", "")
+	if not _reask_mark.is_empty() and _reask_mark["visitor"]["state"] == "waiting_item":
+		return _reask_mark["item_id"]
+	return ""
+
+
+func _refresh_slots() -> void:
+	var highlight := _highlight_item()
 	s.inventory.hand()
 	for pair in [[_table_box, "StallTable", "摊位"], [_bag_box, "Bag", "行囊"], [_bag_box, "Hand", "手上"]]:
 		var box: HBoxContainer = pair[0]
@@ -219,7 +228,8 @@ func _visitor_text(v: Dictionary) -> String:
 		"haggling":
 			return "#%d%s 正在跟你讲价" % [num, regular]
 		"waiting_item":
-			return "#%d%s 谈好了，等你拿货，还能等 %d 秒 → 交货" % [num, regular, int(float(v["wait"]))]
+			var mood := Sampler.mood_hint(v["ctx"], s.player)
+			return "#%d%s 谈好了，等你拿货，还能等 %d 秒%s → 交货（空手点他再问一次）" % [num, regular, int(float(v["wait"])), "，" + mood if mood != "" else ""]
 		_:
 			return "#%d%s 在挑货" % [num, regular]
 
@@ -375,6 +385,10 @@ func _on_visitor_arrived(v: Dictionary) -> void:
 func _on_visitor_left(v: Dictionary) -> void:
 	if v == _haggle_visitor:
 		return
+	if v.get("left_reason", "") == "mood":
+		# 等到这次动作的话说完再说（再问、递错时他先回一句，再走）
+		_say.call_deferred("[color=#e05a4f]#%d：「算了，不要了。」走了。这单黄了。[/color]" % _area.visitor_numbers.get(v["customer"].id, 0))
+		return
 	if v["state"] == "left" and v["want"].any(func(w): return not w["done"]) and phase == Phase.OPEN:
 		var num: int = _area.visitor_numbers.get(v["customer"].id, 0)
 		if v["ctx"].wrong_deliveries < 2:
@@ -405,7 +419,11 @@ func _deliver(v: Dictionary) -> void:
 	var r := session.deliver(v, _hand())
 	match r["result"]:
 		"empty":
-			_say("#%d：「我要的是%s。」" % [num, v["hint"]])
+			_reask(v, num)
+			return
+		"wrong_mood_left":
+			_say("[color=#e05a4f]#%d：「不是这条。」[/color]" % num)
+			_spend(1.0)
 		"wrong":
 			_say("[color=#e05a4f]#%d：「不是这条。」[/color]他有点不耐烦了，货还在你手上。" % num)
 			_spend(1.0)
@@ -420,6 +438,21 @@ func _deliver(v: Dictionary) -> void:
 			if r["continued"]:
 				_say("#%d 又在摊上挑起来了。" % num)
 			_spend(1.0)
+	_refresh_all()
+
+
+## 手上没货点等货的客人：再问一次他要什么（06 §3.6）。第一次免费，之后可能惹他不耐烦。
+func _reask(v: Dictionary, num: int) -> void:
+	var r := session.reask(v)
+	_spend(StallSession.REASK_SECONDS)
+	match r["result"]:
+		"reask":
+			_say("#%d：「我要的是%s。」" % [num, r["hint"]])
+		"reask_annoyed", "reask_left":
+			_say("[color=#e0a040]#%d：「不是说了吗，%s。」[/color]" % [num, r["hint"]])
+	if not r["remembered"].is_empty() and r["result"] != "reask_left":
+		_reask_mark = {"visitor": v, "item_id": r["remembered"][0]}
+		_say("你想起来了，是白框那份。")
 	_refresh_all()
 
 

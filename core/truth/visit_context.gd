@@ -19,13 +19,27 @@ var patience_left: int = -1
 var tol_offset: float = 0.0
 ## 已经买到的预期值序号
 var done_expectations: Array = []
+## 本次来访的心情（06 §3.6）：从 mood_today（−0.2..0.2）起算，被再问、被递错、等太久都往下走，不回升；
+## 掉到 MOOD_LEAVE 以下就「算了，不要了」走人
+var mood: float = 0.0
+## 等货时被再问了几次，第 1 次免费
+var reask_count: int = 0
+
+const MOOD_LEAVE := -0.5
 
 
 static func create(_c: CustomerProfile, rng: GameRng = null) -> VisitContext:
 	var ctx := VisitContext.new()
 	if rng != null:
 		ctx.tol_offset = rng.randf_range(-0.05, 0.05)
+		ctx.mood = rng.randf_range(-0.2, 0.2)
 	return ctx
+
+
+## 心情只降不升（06 §3.6）。返回是不是已经低到要走。
+func lower_mood(d: float) -> bool:
+	mood -= absf(d)
+	return mood < MOOD_LEAVE
 
 
 func set_budget_from(c: CustomerProfile, sku_id: String) -> void:

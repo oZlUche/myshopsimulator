@@ -169,8 +169,7 @@ func _refresh_slots() -> void:
 	if ops == null:
 		return
 	session.refresh_layout()
-	var highlight: String = _haggle_visitor.get("item_id", "") if not _haggle_visitor.is_empty() else ""
-	ops.closeup(_closeup, highlight)
+	ops.closeup(_closeup, _highlight_item())
 	ops.carry(_carry)
 	_view.cart_slot = ops.cart()
 	_view.cart_g = ops.cart_foot() if ops.cart() != null else Vector2(-99, -99)

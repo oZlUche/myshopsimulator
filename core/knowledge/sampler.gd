@@ -33,6 +33,17 @@ static func customer_hint(c: CustomerProfile, player: PlayerState, sku_for_budge
 	return h
 
 
+## 等货客人的心情（06 §3.6）：【客人观察】Lv2 起看得出他不耐烦了。看不出或心情还行返回空字符串。
+static func mood_hint(ctx: VisitContext, player: PlayerState) -> String:
+	if player.skill_level("customer_observation") < 2:
+		return ""
+	if ctx.mood < -0.35:
+		return "快没耐心了"
+	if ctx.mood < -0.2:
+		return "有点不耐烦了"
+	return ""
+
+
 static func _qual(v: float, words: Array, prec: int) -> String:
 	match prec:
 		0:
