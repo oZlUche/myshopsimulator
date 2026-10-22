@@ -246,3 +246,106 @@ func test_cost_shown_from_provenance_or_estimated() -> void:
 	assert_true(float(old["cost"]) > 0.0)
 	ss.s.supplier_catalog = [{"sku_id": RED, "unit_price": 30.0, "stock": 5}]
 	assert_near(float(ss.cost_of(t.stack.items[0].id, RED)["cost"]), 30.0, 0.0001, "按当前本地进货价估算")
+
+
+func test_reask_first_free_then_may_annoy_and_he_leaves() -> void:
+	var ss := _session()
+	var t := _table(ss, [RED])
+	var c := _customer(ss.s, 0.0, "tug_of_war", 1.0)
+	c.personality["composed"] = 0.0
+	ss.s.customers.record_purchase(c, 10.0, 10.0)   # 已是常客
+	var p0: float = ss.s.customers.return_probability[c.id]
+	var v := _visitor(ss, c, t.stack.items[0].id)
+	_deal(ss, v)
+	var ctx: VisitContext = v["ctx"]
+	var w := float(v["wait"])
+	var r := ss.reask(v)
+	assert_eq(r["result"], "reask", "第一次再问免费")
+	assert_eq(r["hint"], v["hint"], "说的和成交那一刻一样")
+	assert_near(ctx.mood, 0.0)
+	assert_near(float(v["wait"]), w)
+	assert_near(ss.p_annoy(c), 0.75, 0.0001, "精算、不随和、不沉稳：0.2 + 0.4 + 0.15")
+	var annoyed := 0
+	for i in 60:
+		var rapport := ctx.rapport
+		w = float(v["wait"])
+		r = ss.reask(v)
+		if r["result"] == "reask":
+			continue
+		annoyed += 1
+		assert_near(ctx.rapport, rapport - 0.1, 0.0001, "不耐烦：好感 −0.1")
+		assert_near(ctx.mood, -0.25 * annoyed, 0.0001, "心情 −0.25")
+		if r["result"] == "reask_left":
+			break
+		assert_near(float(v["wait"]), w * 0.8, 0.0001, "剩余等待 ×0.8")
+	assert_eq(annoyed, 3, "心情掉到 −0.75（< −0.5）才走")
+	assert_eq(v["state"], "left")
+	assert_eq(v.get("left_reason", ""), "mood")
+	assert_eq(int(ss.s.period_stats["lost_after_deal"]), 1)
+	assert_near(float(ss.s.customers.return_probability[c.id]), p0 - 0.05, 0.0001, "常客回购率 −0.05")
+	assert_eq(ss.reask(v)["result"], "not_waiting")
+
+
+func test_p_annoy_bounds_and_eloquence() -> void:
+	var ss := _session()
+	var calm := _customer(ss.s, 1.0, "tug_of_war", 0.0)
+	calm.personality["composed"] = 1.0
+	assert_near(ss.p_annoy(calm), 0.05, 0.0001, "随和沉稳、不精算：夹到 0.05")
+	var mid := _customer(ss.s)
+	assert_near(ss.p_annoy(mid), 0.2 + 0.2 - 0.125 + 0.075, 0.0001)
+	ss.s.player.skills["eloquence"] = {"level": 3, "invested": 0.0}
+	assert_near(ss.p_annoy(mid), (0.2 + 0.2 - 0.125 + 0.075) * 0.7, 0.0001, "口才 Lv3 起 ×0.7")
+
+
+func test_waiting_and_wrong_items_wear_mood_down() -> void:
+	var ss := _session()
+	var t := _table(ss, [RED, BLUE])
+	var v := _visitor(ss, _customer(ss.s), t.stack.items[0].id)
+	_deal(ss, v)
+	var ctx: VisitContext = v["ctx"]
+	var total := float(v["wait"])
+	ss.tick(total * 0.26)
+	assert_near(ctx.mood, -0.1, 0.0001, "等过 25%：心情 −0.1")
+	ss.tick(total * 0.25)
+	assert_near(ctx.mood, -0.2, 0.0001, "等过 50%：再 −0.1")
+	assert_eq(v["state"], "waiting_item")
+	ss.api.take_top_to_hand(t.id)   # 蓝的
+	ctx.mood = -0.4
+	assert_eq(ss.deliver(v, ss.s.inventory.hand())["result"], "wrong_mood_left", "递错 −0.15，掉到底直接走")
+	assert_eq(v["state"], "left")
+	assert_eq(int(ss.s.period_stats["lost_after_deal"]), 1)
+
+
+func test_bad_mood_leaves_while_waiting() -> void:
+	var ss := _session()
+	var t := _table(ss, [RED])
+	var c := _customer(ss.s)
+	c.self_serve = 1.0
+	var v := _visitor(ss, c, t.stack.items[0].id)
+	_deal(ss, v)
+	v["ctx"].mood = -0.35
+	var got := []
+	ss.self_served.connect(func(vv, r): got.append(r))
+	for i in 20:
+		ss.tick(float(v["wait_total"]) * 0.05)
+	assert_eq(v["state"], "left", "−0.35 等过一半掉到 −0.55，不等到头就走")
+	assert_eq(v.get("left_reason", ""), "mood")
+	assert_eq(got.size(), 0, "心情差走的不会自己上手拿")
+	assert_eq(int(ss.s.period_stats["lost_after_deal"]), 1)
+
+
+func test_mood_hint_needs_observation_lv2() -> void:
+	var p := PlayerState.new()
+	var ctx := VisitContext.new()
+	ctx.mood = -0.3
+	assert_eq(Sampler.mood_hint(ctx, p), "", "看不出来")
+	p.skills["customer_observation"] = {"level": 2, "invested": 0.0}
+	assert_eq(Sampler.mood_hint(ctx, p), "有点不耐烦了")
+	ctx.mood = -0.45
+	assert_eq(Sampler.mood_hint(ctx, p), "快没耐心了")
+	ctx.mood = 0.1
+	assert_eq(Sampler.mood_hint(ctx, p), "")
+	var rng := GameRng.new(3)
+	for i in 20:
+		var m := VisitContext.create(CustomerProfile.new(), rng).mood
+		assert_true(m >= -0.2 and m <= 0.2, "来访时的心情 −0.2..0.2")

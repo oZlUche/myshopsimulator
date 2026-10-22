@@ -137,12 +137,15 @@ func _init() -> void:
 	st._end_haggle()
 	assert(buyer["state"] == "waiting_item", "谈成后应等你拿货，不自动出货：%s" % buyer["state"])
 	var sales0 = s.period_stats["sales"]
-	# 手上空着点他：只提示他要哪份，不扣等待时间
+	# 手上空着点他：再问一次他要哪份（06 §3.6），第一次免费，只花 2 秒
 	while hand.stack.height() > 0:
 		st._on_slot(tables[2].id)
 	var w0 = buyer["wait"]
+	var mood0 = buyer["ctx"].mood
 	st._on_visitor_clicked(buyer)
-	assert(buyer["state"] == "waiting_item" and buyer["wait"] == w0)
+	assert(buyer["state"] == "waiting_item" and buyer["ctx"].reask_count == 1)
+	assert(abs(buyer["wait"] - (w0 - StallSession.REASK_SECONDS)) < 0.001, "再问花 2 秒：%f → %f" % [w0, buyer["wait"]])
+	assert(buyer["ctx"].mood >= mood0 - StallSession.WAIT_MOOD_STEP - 0.001, "第一次再问不扣心情")
 	# 找到他要的那份拿到手上（在顶上就拿顶，否则抽），再点他交货
 	var want = buyer["want"][0]
 	var loc = st.session.locate(want["item_id"])

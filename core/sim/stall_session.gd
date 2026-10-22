@@ -11,6 +11,11 @@ const TRAFFIC_SCALE := 0.12
 ## 合拍客人保底计时器（06 §3.1）：间隔 T = T0 / (1 + k·摊上货物份数)
 const FIT_T0 := 90.0
 const FIT_K := 0.08
+## 等货时再问一次（06 §3.6）：耗时；不耐烦、递错、每等过 25% 时心情各掉多少
+const REASK_SECONDS := 2.0
+const REASK_MOOD_STEP := 0.25
+const WRONG_MOOD_STEP := 0.15
+const WAIT_MOOD_STEP := 0.1
 
 signal visitor_arrived(visitor: Dictionary)
 signal visitor_left(visitor: Dictionary)
@@ -122,6 +127,8 @@ func tick(dt: float) -> void:
 			continue
 		v["wait"] = float(v["wait"]) - dt
 		if v["wait"] > 0.0:
+			if v["state"] == "waiting_item":
+				_wait_mood(v)
 			continue
 		match v["state"]:
 			"browsing":
@@ -178,6 +185,27 @@ func _wait_ran_out(v: Dictionary) -> void:
 			s.customers.penalize(c, 0.1)
 	if missing:
 		s.period_stats["lost_after_deal"] = int(s.period_stats.get("lost_after_deal", 0)) + 1
+	_leave(v)
+
+
+## 等货等得越久心情越差（06 §3.6）：每过等待时间的 25% 心情 −0.1，掉到底就走。
+func _wait_mood(v: Dictionary) -> void:
+	var total := float(v.get("wait_total", 0.0))
+	if total <= 0.0:
+		return
+	var marks := mini(int((total - float(v["wait"])) / (total * 0.25)), 3)
+	var ctx: VisitContext = v["ctx"]
+	while int(v.get("wait_marks", 0)) < marks:
+		v["wait_marks"] = int(v.get("wait_marks", 0)) + 1
+		if ctx.lower_mood(WAIT_MOOD_STEP):
+			_mood_leave(v)
+			return
+
+
+## 心情太低：「算了，不要了」立刻走（06 §3.6），算谈成没拿到货，常客回购率 −0.05。
+func _mood_leave(v: Dictionary) -> void:
+	v["left_reason"] = "mood"
+	_lose_deal(v, 0.05)
 	_leave(v)
 
 
@@ -439,6 +467,8 @@ func finish(v: Dictionary, h: HaggleState) -> void:
 	v["hint"] = _describe_want(want)
 	v["state"] = "waiting_item"
 	v["wait"] = wait_for_item(c)
+	v["wait_total"] = v["wait"]
+	v["wait_marks"] = 0
 
 
 ## 等货时间：约 20 + 40·patience 秒，口才 Lv5 减缓。
@@ -497,10 +527,14 @@ func deliver(v: Dictionary, hand: Slot) -> Dictionary:
 	if int(out["count"]) == 0:
 		ctx.wrong_deliveries += 1
 		ctx.add_rapport(-0.3)
+		var fed_up := ctx.lower_mood(WRONG_MOOD_STEP)
 		if ctx.wrong_deliveries >= 2:
 			_lose_deal(v, 0.15)
 			_leave(v)
 			out["result"] = "wrong_left"
+		elif fed_up:
+			_mood_leave(v)
+			out["result"] = "wrong_mood_left"
 		else:
 			v["wait"] = maxf(3.0, float(v["wait"]) - 10.0)
 			out["result"] = "wrong"
@@ -526,6 +560,39 @@ func deliver(v: Dictionary, hand: Slot) -> Dictionary:
 		out["continued"] = true
 	else:
 		_leave(v)
+	return out
+
+
+## 再问一次的不耐烦概率（06 §3.6）：精算、不随和、不沉稳的人更烦；口才 Lv3 起 ×0.7。
+func p_annoy(c: CustomerProfile) -> float:
+	var p := clampf(0.2 + 0.4 * c.trait_of("shrewd") - 0.25 * c.trait_of("agreeable") + 0.15 * (1.0 - c.trait_of("composed")), 0.05, 0.8)
+	return p * (0.7 if s.player.skill_level("eloquence") >= 3 else 1.0)
+
+
+## 等货的客人被点到、手上 / 车上没货：再问一次他要什么（06 §3.6），耗 REASK_SECONDS（时间由场景花）。
+## 他按成交那一刻的描述重说一遍；第一次免费，之后按 p_annoy 掷：中 → 心情 −0.25、好感 −0.1、剩余等待 ×0.8，
+## 心情掉到底就走。返回 {result: reask | reask_annoyed | reask_left | not_waiting, hint, remembered}；
+## remembered 是他要的货里【强化记忆】记得所在格子的那几份（场景用来加亮）。
+func reask(v: Dictionary) -> Dictionary:
+	var out := {"result": "not_waiting", "hint": "", "remembered": []}
+	if v["state"] != "waiting_item":
+		return out
+	var c: CustomerProfile = v["customer"]
+	var ctx: VisitContext = v["ctx"]
+	ctx.reask_count += 1
+	out["hint"] = v["hint"]
+	for w in v["want"]:
+		var loc := locate(w["item_id"])
+		if not w["done"] and not loc.is_empty() and s.knowledge.memory_of(loc["slot_id"]) != null:
+			out["remembered"].append(w["item_id"])
+	out["result"] = "reask"
+	if ctx.reask_count > 1 and s.rng.chance(p_annoy(c)):
+		ctx.add_rapport(-0.1)
+		v["wait"] = float(v["wait"]) * 0.8
+		out["result"] = "reask_annoyed"
+		if ctx.lower_mood(REASK_MOOD_STEP):
+			_mood_leave(v)
+			out["result"] = "reask_left"
 	return out
 
 
