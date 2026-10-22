@@ -16,7 +16,7 @@ func test_fixed_part_averages_one_over_a_year() -> void:
 		if low_q == 0 or b < e.rhythm(low_q):
 			low_q = q
 	assert_near(sum / 36.0, 1.0, 0.0001, "没天气时夹限后一年均值 = 1.000")
-	assert_near(EconomyState.rhythm_norm(), 1.0994, 0.001, "Z 让夹限后的均值归一")
+	assert_near(EconomyState.rhythm_norm(), 1.0990, 0.001, "Z 让夹限后的均值归一")
 	assert_true(peak_q >= 34, "年关三旬是全年客流峰，实际峰在第 %d 旬" % peak_q)
 	assert_near(e.rhythm(1 + 36), e.rhythm(1), 0.000001, "固定部分按年循环")
 	var season_sum := 0.0
@@ -61,7 +61,8 @@ func test_weather_decays_and_indoor_rain_is_halved() -> void:
 	e.rhythm_events = [{"kind": "rain", "start": 12, "duration": 1, "traffic_mult": 0.75, "intent_add": 0.0}]
 	assert_near(float(e.weather(12)[0]), 0.75, 0.000001, "街上 ×0.75")
 	assert_near(float(e.weather(12, true)[0]), 0.875, 0.000001, "店里减半 ×0.875")
-	assert_near(e.rhythm(12), EconomyState.B_MIN, 0.000001, "夏天本来就淡，下雨顶到 0.6 的夹限")
+	assert_near(e.rhythm(12), e.rhythm(12 + 36) * 0.75, 0.000001, "夏天本来就淡，下雨还看得出来（下限 0.4）")
+	assert_true(e.rhythm(12) > EconomyState.B_MIN)
 	# 倍率本身拿一个不碰夹限的旬看
 	e.rhythm_events = [{"kind": "rain", "start": 30, "duration": 1, "traffic_mult": 0.75, "intent_add": 0.0}]
 	var wet := e.effective(30)
@@ -93,8 +94,8 @@ func test_weather_rolls_in_season_without_stacking() -> void:
 	assert_true(max_alive <= EconomyState.WEATHER.size(), "过期的天气会清掉")
 	for k in EconomyState.WEATHER:
 		assert_true(int(counts.get(k, 0)) > 0, "%s 四十年里出现过" % k)
-	# 降温：秋冬 21 旬、每旬 10%、同类不叠 → 一年大约 1.9 次
-	assert_true(int(counts["cold"]) > 40 and int(counts["cold"]) < 110, "降温次数合理：%d" % int(counts["cold"]))
+	# 降温：秋冬 21 旬、每旬 8%、同类不叠 → 一年大约 1.5 次
+	assert_true(int(counts["cold"]) > 35 and int(counts["cold"]) < 95, "降温次数合理：%d" % int(counts["cold"]))
 
 
 func test_weather_mean_close_to_one_over_years() -> void:
@@ -106,10 +107,10 @@ func test_weather_mean_close_to_one_over_years() -> void:
 	for p in range(2, n + 2):
 		e.period_step(p, 0.0, rng)
 		var q := EconomyState.year_q(p)
-		sum_fixed += clampf(EconomyState.season_demand(q) * float(EconomyState.calendar(q)[0]) / EconomyState.rhythm_norm(), 0.6, 1.6)
+		sum_fixed += clampf(EconomyState.season_demand(q) * float(EconomyState.calendar(q)[0]) / EconomyState.rhythm_norm(), EconomyState.B_MIN, EconomyState.B_MAX)
 		sum_all += e.rhythm(p)
 	assert_near(sum_fixed / n, 1.0, 0.000001, "固定部分年均 = 1.000")
-	assert_true(absf(sum_all / n - 1.0) < 0.02, "含天气、夹限后长期均值 0.98–1.02：%f" % (sum_all / n))
+	assert_true(absf(sum_all / n - 1.0) < 0.01, "含天气、夹限后长期均值 0.99–1.01：%f" % (sum_all / n))
 
 
 func test_intent_and_traffic_carry_rhythm() -> void:
@@ -155,6 +156,17 @@ func test_rhythm_events_survive_save_and_old_saves_default_empty() -> void:
 	var old := EconomyState.from_dict({"base": {"consumption_level": 1.0}})
 	assert_eq(old.rhythm_events, [], "老存档没有天气事件")
 	assert_near(old.rhythm(5), e.rhythm(5 + 36), 0.000001, "老存档只剩固定节拍")
+
+
+func test_new_game_opens_at_spring_fair() -> void:
+	var s := GameState.new_game(1)
+	assert_eq(s.clock.period, 4, "第 1 年 2 月上旬开局")
+	assert_eq(s.clock.label(), "第1年 2月上旬（春）")
+	assert_eq(EconomyState.calendar_names(s.clock.period), ["开春集"])
+	assert_true(float(s.econ_now()["rhythm_mult"]) > 1.2, "开局赶上大集，人多")
+	var old := GameState.from_dict(JSON.parse_string(JSON.stringify(s.to_dict())))
+	assert_eq(old.clock.period, 4)
+	assert_eq(Clock.from_dict({}).period, 1, "老存档的旬号照旧")
 
 
 func test_planning_calendar_and_weather_notice() -> void:

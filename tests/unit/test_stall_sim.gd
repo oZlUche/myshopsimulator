@@ -27,7 +27,7 @@ func test_full_stall_period_runs_and_sells() -> void:
 	PeriodRunner.begin_period(s)
 	AutoSeller.auto_prepare(s)
 	var rep := AutoSeller.simulate_stall_period(s)
-	assert_eq(s.clock.period, 2)
+	assert_eq(s.clock.period, Clock.START_PERIOD + 1)
 	assert_true(int(rep["traffic"]) > 50, "一旬应有相当数量的过路客：%d" % int(rep["traffic"]))
 	assert_true(int(rep["sales"]) > 0, "自动摆摊一旬应至少卖出一件")
 	assert_eq(s.inventory.count_items("", "StallTable"), 0, "收摊后摊位应清空")
@@ -39,7 +39,7 @@ func test_year_of_play_is_stable() -> void:
 		PeriodRunner.begin_period(s)
 		AutoSeller.auto_prepare(s, 0.5)
 		AutoSeller.simulate_stall_period(s, -1.0, 2.0)
-	assert_eq(s.clock.period, 37)
+	assert_eq(s.clock.period, Clock.START_PERIOD + 36)
 	assert_eq(s.economy.base_delta_history.size(), 1, "满一年应发生一次宏观调整")
 	assert_true(s.player.cash > 0.0)
 
