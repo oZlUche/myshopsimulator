@@ -16,5 +16,6 @@
 	"employee_observation": {"name": "员工观察", "xp_costs": [100, 180, 280, 400, 550, 750], "phase_cap": {"stall": 0, "shop": 6},
 		"requires": {"1": [{"flag": "has_employee"}]}},
 	"driving": {"name": "驾驶", "xp_costs": [80, 150, 240, 360, 500, 700], "phase_cap": {"stall": 0, "shop": 6},
-		"requires": {"1": [{"flag": "has_vehicle"}]}}
+		"requires": {"1": [{"flag": "has_vehicle"}]}},
+	"carrying": {"name": "搬运", "xp_costs": [60, 120, 200, 320, 480, 700], "phase_cap": {"stall": 3, "shop": 6}}
 }

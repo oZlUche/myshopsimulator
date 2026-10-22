@@ -198,7 +198,7 @@ func _refresh_slots() -> void:
 			UIKit.clear(box)
 		var n := 1
 		for sl in s.inventory.slots_of_type(pair[1]):
-			var title: String = "手上（最多 %d 份）" % Inventory.HAND_MAX if pair[1] == "Hand" else "%s %d" % [pair[2], n]
+			var title: String = "手上（最多 %d 份）" % sl.stack.max_height if pair[1] == "Hand" else "%s %d" % [pair[2], n]
 			var v := StackView.new().setup(sl, title)
 			n += 1
 			v.highlight_item_id = highlight
@@ -276,7 +276,7 @@ func _on_top(slot_id: String) -> void:
 		_say("手上拿不下了，先点某一格的空处放下。")
 		return
 	if api.take_top_to_hand(slot_id) != null:
-		_spend(ActionAPI.TAKE_TOP_SECONDS)
+		_spend(api.handle_seconds(ActionAPI.TAKE_TOP_SECONDS))
 	_refresh_slots()
 
 
@@ -316,7 +316,7 @@ func _on_slot(slot_id: String) -> void:
 	if not r["ok"]:
 		_say("放不下了。")
 	else:
-		_spend(ActionAPI.TAKE_TOP_SECONDS)
+		_spend(api.handle_seconds(ActionAPI.TAKE_TOP_SECONDS))
 	_refresh_slots()
 
 

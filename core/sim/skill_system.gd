@@ -112,3 +112,17 @@ static func haggle_mods(player: PlayerState) -> Dictionary:
 		"reserve_mult": shout["reserve_mult"],
 		"loyalty_bonus": 0.05 if lv >= 6 else 0.0,
 	}
+
+
+## 搬运（02 §2.10）：手上能拿几份、拿放快慢、抱箱 / 推车走多快。只改玩家自己的动作上限，不碰真相层。
+## 散货 / 包 / 箱三选一（03 §4），各按自己的上限判断。
+static func carry_mods(player: PlayerState) -> Dictionary:
+	var lv := player.skill_level("carrying")
+	return {
+		"hand_items": 6 if lv >= 5 else (5 if lv >= 3 else (4 if lv >= 1 else 3)),
+		"hand_packs": 5 if lv >= 5 else (4 if lv >= 3 else 3),
+		"hand_boxes": 2 if lv >= 6 else 1,
+		"handle_time_mult": 0.8 if lv >= 2 else 1.0,
+		"box_walk_mult": 0.75 if lv >= 4 else 0.6,
+		"cart_walk_mult": 0.9 if lv >= 4 else 0.8,
+	}

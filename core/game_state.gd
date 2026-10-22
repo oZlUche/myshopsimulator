@@ -7,8 +7,16 @@ const GAME_VERSION := "0.0.1"
 var clock := Clock.new()
 var rng := GameRng.new()
 var flags := DifficultyFlags.new()
-var player := PlayerState.new()
-var inventory := Inventory.new()
+var player := PlayerState.new():
+	set(v):
+		player = v
+		if inventory != null:
+			inventory.player = v
+var inventory := Inventory.new():
+	set(v):
+		inventory = v
+		if inventory != null:
+			inventory.player = player
 var knowledge := Knowledge.new()
 var economy := EconomyState.new()
 var trend := TrendState.new()
@@ -25,6 +33,11 @@ var events: Dictionary = {}
 var meta: Dictionary = {}
 ## 运行时：事件总线（不存档）
 var bus := EventBus.new()
+
+
+func _init() -> void:
+	# 手上能拿多少看玩家的【搬运】（Inventory.hand()）
+	inventory.player = player
 
 
 static func new_game(seed_value: int) -> GameState:
