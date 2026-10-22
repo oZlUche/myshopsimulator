@@ -181,10 +181,10 @@ static func draw_bubble(ci: CanvasItem, pos: Vector2, kind: String, a := 1.0) ->
 ## phase 为走路动画相位（秒），站着传 0。k 放大倍数只取整（1 或 2），像素才整齐。
 ## style 发型（Hair 枚举，-1 按衣服发色自动挑一个）；pants 裤色（透明 = 按上衣加深）；scarf 有颜色就围一条围巾。
 ## 颜色的 alpha 会一起作用到整个人（路人淡出用）。
-## pose："walk" 走路 / "push" 推手推车（双手扶车把，车用 pushed_cart 另画）。
+## pose："walk" 走路 / "push" 推手推车（双手扶车把，车用 pushed_cart 另画）/ "carry" 抱着箱包或一摞围巾（双手收在身前托着，东西由调用方画）。
 static func draw_person(ci: CanvasItem, foot: Vector2, body: Color, hair: Color, facing := 1.0, phase := 0.0, back := false, k := 1.0, style := -1, pants := Color(0, 0, 0, 0), scarf := Color(0, 0, 0, 0), pose := "walk") -> void:
 	var px := PX * maxf(1.0, floorf(k))
-	var pre := "person_push_" if pose == "push" else "person_"
+	var pre := "person_" if pose == "walk" else "person_%s_" % pose
 	var a := body.a
 	draw_shadow(ci, foot, 8.0 * px, 3.0 * px, 0.3 * a)
 	var dir := (2 if back else 0) + (1 if facing < 0.0 else 0)
@@ -214,6 +214,26 @@ static func draw_person(ci: CanvasItem, foot: Vector2, body: Color, hair: Color,
 	if scarf.a > 0.0:
 		scarf.a *= a
 		ci.draw_texture_rect_region(sprite_tex(pre + "scarf"), dst, src, scarf)
+
+
+## 抱在身前的东西（配 draw_person 的 pose "carry"）：画在两手之间、腰上方。foot_g 是脚下点（格坐标）。
+## c = {box: 是纸箱, pack: 是整包, n: 几份, color: 包里 / 散货的颜色}。箱子是一只小纸箱（抱两箱摞起来，会挡住脸），
+## 整包是扁扁的几袋摞着，散货是叠好的几条围巾。脸朝镜头时在画完人之后调，背对时先调（被身子挡住）。
+const CARRY_UP := 6.0
+
+
+static func draw_carried(ci: CanvasItem, origin: Vector2, foot_g: Vector2, c: Dictionary) -> void:
+	var n := int(c.get("n", 1))
+	var col: Color = c.get("color", Color.WHITE)
+	if c.get("box", false):
+		for i in mini(n, 2):
+			draw_sprite(ci, origin, foot_g - Vector2(0.16, 0.16), "eq_carton_carry", Color.WHITE, CARRY_UP + i * 6.0)
+	elif c.get("pack", false):
+		for i in mini(n, 6):
+			draw_sprite(ci, origin, foot_g - Vector2(0.18, 0.23), "eq_bag", Color.WHITE.lerp(col, 0.45), CARRY_UP - 2.0 + i * 3.0)
+	else:
+		for i in mini(n, 6):
+			draw_sprite(ci, origin, foot_g - Vector2(0.2, 0.2), "fold_sw", col.lerp(Color.WHITE, 0.12 * i), CARRY_UP + 3.0 + i * 3.0)
 
 
 ## 推着的手推车该画在哪：foot_g 是人脚下的格坐标（可以带小数），facing / back 同 draw_person。
@@ -334,30 +354,43 @@ static func draw_equipment(ci: CanvasItem, origin: Vector2, g: Vector2, kind: St
 		for i in maxi(1, int(extra.get("count", 1))):
 			draw_sprite(ci, origin, g, name, Color.WHITE, i * float(m["H"]))
 		return
-	draw_sprite(ci, origin, g, name, extra.get("col", Color.WHITE))
+	var col: Color = extra.get("col", Color.WHITE)
+	draw_sprite(ci, origin, g, name, col)
 	var tiers: Array = m.get("tiers", [])
 	var slot := Vector2(m["slot"][0], m["slot"][1]) if m.has("slot") else Vector2(0.5, 0.5)
-	if extra.has("tiers"):
-		var fold := "fold_" + facing
-		var fh := float(sprite_meta(fold).get("H", 3))
-		for k in mini(tiers.size(), extra["tiers"].size()):
-			var i := 0
-			for c in extra["tiers"][k]:
-				draw_sprite(ci, origin, g + slot, fold, c, float(tiers[k]) + i * fh)
-				i += 1
-	if extra.has("boxes"):
-		for k in mini(tiers.size(), extra["boxes"].size()):
-			for i in int(extra["boxes"][k]):
-				var off := Vector2(0.5 * i, 0) if facing == "sw" else Vector2(0, 0.5 * i)
-				draw_sprite(ci, origin, g + slot + off, "eq_carton_small_" + facing, Color.WHITE, float(tiers[k]))
-	if extra.has("bags"):
-		for k in mini(tiers.size(), extra["bags"].size()):
-			for i in int(extra["bags"][k]):
-				var a := i % 3
-				var b := i / 3
-				var off := Vector2(0.3 * a, 0.45 * b) if facing == "sw" else Vector2(0.45 * b, 0.3 * a)
-				draw_sprite(ci, origin, g + slot + off, "eq_bag", Color.WHITE, float(tiers[k]))
+	# 有层板图层的设备（货架、仓库货架）逐层叠：第 k 层板 → 第 k 层的货 → 第 k+1 层板（= 第 k 层的顶）→ …
+	# → 顶板 → 前框。上一层的板盖住下一层的货，前面的立柱盖住所有层（docs/08 §5）。
+	var layered := not sprite_meta("eq_%s_board0_%s" % [kind, facing]).is_empty()
+	for k in tiers.size():
+		if layered:
+			draw_sprite(ci, origin, g, "eq_%s_board%d_%s" % [kind, k, facing], col)
+		_draw_tier_goods(ci, origin, g + slot, facing, float(tiers[k]), k, extra)
+	if layered:
+		draw_sprite(ci, origin, g, "eq_%s_board%d_%s" % [kind, tiers.size(), facing], col)
+	if not sprite_meta("eq_%s_front_%s" % [kind, facing]).is_empty():
+		draw_sprite(ci, origin, g, "eq_%s_front_%s" % [kind, facing], col)
 	if kind == "shop_window":
 		draw_sprite(ci, origin, g, "eq_shop_window_glass_" + facing)
 	if kind == "mannequin" and extra.has("scarf"):
 		draw_sprite(ci, origin, g, "eq_mannequin_scarf", extra["scarf"])
+
+
+## 第 k 层（层板上表面高 up 美术像素）上的货：货架、橱窗是一摞叠好的围巾，仓库货架是箱和包。at = 设备格 + slot。
+static func _draw_tier_goods(ci: CanvasItem, origin: Vector2, at: Vector2, facing: String, up: float, k: int, extra: Dictionary) -> void:
+	if extra.has("tiers") and k < extra["tiers"].size():
+		var fold := "fold_" + facing
+		var fh := float(sprite_meta(fold).get("H", 3))
+		var i := 0
+		for c in extra["tiers"][k]:
+			draw_sprite(ci, origin, at, fold, c, up + i * fh)
+			i += 1
+	if extra.has("boxes") and k < extra["boxes"].size():
+		for i in int(extra["boxes"][k]):
+			var off := Vector2(0.5 * i, 0) if facing == "sw" else Vector2(0, 0.5 * i)
+			draw_sprite(ci, origin, at + off, "eq_carton_small_" + facing, Color.WHITE, up)
+	if extra.has("bags") and k < extra["bags"].size():
+		for i in int(extra["bags"][k]):
+			var a := i % 3
+			var b := i / 3
+			var off := Vector2(0.3 * a, 0.45 * b) if facing == "sw" else Vector2(0.45 * b, 0.3 * a)
+			draw_sprite(ci, origin, at + off, "eq_bag", Color.WHITE, up)

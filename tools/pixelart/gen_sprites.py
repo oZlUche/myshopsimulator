@@ -220,6 +220,16 @@ def body_frame(frame, back, pose="walk"):
         # 推车（背面）：上臂往前收，前臂和手被身体挡住，肩外只露一小截
         L["top"].rect(5, 15 + bob, 6, 18 + bob, 235)
         L["top"].rect(17, 15 + bob, 18, 18 + bob, 170)
+    elif pose == "carry":
+        # 抱着箱包 / 一摞围巾：手臂不摆，上臂贴着身子往下，前臂往身前收，两只手停在腰上方、身子两侧往里一格；
+        # 抱的东西由游戏画在两手之间（RoomView._draw_carried），背面时手被身子挡住
+        L["top"].rect(5, 15 + bob, 6, 19 + bob, 235)
+        L["top"].rect(17, 15 + bob, 18, 19 + bob, 170)
+        L["top"].rect(6, 20 + bob, 6, 20 + bob, 235)
+        L["top"].rect(17, 20 + bob, 17, 20 + bob, 170)
+        if not back:
+            L["skin"].rect(6, 21 + bob, 7, 21 + bob, LIT)
+            L["skin"].rect(16, 21 + bob, 17, 21 + bob, 215)
     else:
         # 手臂随步伐前后摆：迈左脚时右臂往前（画低一格）
         swing = 1 if frame == 1 else (-1 if frame == 3 else 0)
@@ -525,10 +535,11 @@ def generate():
     sheets = build_person()
     for k, img in sheets.items():
         write(img, "person_" + k if k != "hair" else "hair")
-    # 推车姿态：person_push_*，头发共用 hair.png
-    for k, img in build_person("push").items():
-        if k != "hair":
-            write(img, "person_push_" + k)
+    # 推车 / 抱东西姿态：person_push_* / person_carry_*，头发共用 hair.png
+    for pose in ("push", "carry"):
+        for k, img in build_person(pose).items():
+            if k != "hair":
+                write(img, "person_%s_%s" % (pose, k))
     rng = random.Random(7)
     for kind in ["pavement", "road", "grass", "lot", "concrete", "wood", "tile"]:
         for v in range(2):

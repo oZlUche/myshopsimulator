@@ -68,6 +68,21 @@ class Showcase extends Control:
 				Iso.draw_equipment(self, o, cart["g"], "handcart", cart["facing"])
 				var z := float(Iso.sprite_meta("eq_handcart_" + cart["facing"]).get("H", 3))
 				Iso.draw_sprite(self, o, cart["g"] + Vector2(0.25, 0.3), "eq_carton_small_sw" if pi % 2 == 0 else "eq_bag", Color.WHITE, z)})
+		# 抱东西姿态：四个方向，抱一箱 / 三包 / 一摞围巾 / 两箱（背对时东西先画、被身子挡住）
+		var carries := [[Vector2(12.6, 5.6), 1.0, false, {"box": true, "n": 1}], [Vector2(13.4, 6.4), -1.0, false, {"pack": true, "n": 3, "color": purple}],
+			[Vector2(12.8, 7.4), 1.0, true, {"n": 3, "color": red}], [Vector2(13.8, 7.6), -1.0, false, {"box": true, "n": 2}]]
+		for ci in carries.size():
+			var cfoot: Vector2 = carries[ci][0]
+			var cf: float = carries[ci][1]
+			var cb: bool = carries[ci][2]
+			var cc: Dictionary = carries[ci][3]
+			var cfit := Iso.outfit_full(ci * 53 + 11)
+			things.append({"g": cfoot, "f": func():
+				if cb:
+					Iso.draw_carried(self, o, cfoot, cc)
+				Iso.draw_person(self, Iso.to_screen(cfoot, o), cfit["top"], cfit["hair"], cf, 0.15 * ci, cb, 1.0, ci % Iso.HAIR_STYLES, cfit["pants"], cfit["scarf"], "carry")
+				if not cb:
+					Iso.draw_carried(self, o, cfoot, cc)})
 		things.append({"g": Vector2(8, 4), "f": func(): Iso.draw_stall_table(self, o, Vector2(7.2, 4), 2.4, 0.7, 14.0)})
 		for j in 3:
 			var cell := Vector2(7.2 + 2.4 * (j + 0.5) / 3, 4.38)

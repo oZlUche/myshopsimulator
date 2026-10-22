@@ -402,7 +402,7 @@ func _hand_carry() -> Dictionary:
 	if not h.packages.is_empty():
 		var p: Package = h.packages[-1]
 		var top := p.top_item()
-		return {"box": p.is_box(), "n": h.packages.size(), "color": CARDBOARD if p.is_box() else (UIKit.sku_color(top.sku_id) if top else Color.WHITE)}
+		return {"box": p.is_box(), "pack": not p.is_box(), "n": h.packages.size(), "color": CARDBOARD if p.is_box() else (UIKit.sku_color(top.sku_id) if top else Color.WHITE)}
 	if h.stack.height() > 0:
 		return {"box": false, "n": h.stack.height(), "color": UIKit.sku_color(h.stack.items[-1].sku_id)}
 	return {}
@@ -410,16 +410,13 @@ func _hand_carry() -> Dictionary:
 
 func _draw_person_thing(o: Vector2, t: Dictionary) -> void:
 	var foot := Iso.to_screen(t["g"], o)
-	Iso.draw_person(self, foot, t["body"], t["hair"], t["facing"], t["phase"], t["back"], 1.0,
-		t.get("style", -1), t.get("pants", Color(0, 0, 0, 0)), t.get("scarf", Color(0, 0, 0, 0)))
 	var c: Dictionary = t.get("carry", {})
-	if not c.is_empty():
-		var at := foot + Vector2(-9, -34)
-		if c["box"]:
-			draw_rect(Rect2(at + Vector2(-2, -6), Vector2(22, 16)), c["color"])
-			draw_rect(Rect2(at + Vector2(-2, -6), Vector2(22, 16)), Iso.OUTLINE, false, 1.0)
-		else:
-			for i in mini(int(c["n"]), 3):
-				draw_rect(Rect2(at + Vector2(0, 4 - i * 5), Vector2(18, 4)), c["color"].lerp(Color.WHITE, 0.2 * i))
+	# 抱着的东西在身前：脸朝镜头时画在人前面，背对时被身子挡住，先画
+	if not c.is_empty() and t["back"]:
+		Iso.draw_carried(self, o, t["g"], c)
+	Iso.draw_person(self, foot, t["body"], t["hair"], t["facing"], t["phase"], t["back"], 1.0,
+		t.get("style", -1), t.get("pants", Color(0, 0, 0, 0)), t.get("scarf", Color(0, 0, 0, 0)), "walk" if c.is_empty() else "carry")
+	if not c.is_empty() and not t["back"]:
+		Iso.draw_carried(self, o, t["g"], c)
 	if t.get("tag", "") != "":
 		draw_string(get_theme_default_font(), foot + Vector2(-30, 16), t["tag"], HORIZONTAL_ALIGNMENT_CENTER, 60, 12, t.get("tag_color", UIKit.TEXT))

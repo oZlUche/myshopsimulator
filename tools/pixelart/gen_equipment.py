@@ -152,6 +152,31 @@ class IsoBox:
         return [self.ox, self.H + self.pad]
 
 
+def split_layers(b, front_px, board_px):
+    """把一件有层板的设备拆成几张叠画的图（都在 edge() 之后调用，坐标是 edge 之前的）：
+    底图（后面的立柱、背板、侧板）+ 每层一张"层板"图（层板顶面和它朝外的横梁 / 前沿）+ 一张"前框"图（朝外的立柱）。
+    游戏里按 底图 → 第 0 层板 → 第 0 层的货 → 第 1 层板 → 第 1 层的货 → … → 顶板 → 前框 画，
+    第 N 层的货压在第 N 层板上、又被第 N+1 层板（也就是第 N 层的顶）挡住，最后前框挡住所有层。
+    board_px 是按层从下往上的像素集合列表（最后一个是顶板）。返回 (底图, [层板图...], 前框图)。"""
+    S = b.S
+    img = b.img
+    used = set(front_px)
+    for s in board_px:
+        used |= s
+
+    def only(pxs):
+        out = Image.new(img.mode, img.size, (0, 0, 0, 0) if img.mode == "RGBA" else (0, 0))
+        for (x, y) in pxs:
+            out.putpixel((x + S, y + S), img.getpixel((x + S, y + S)))
+        return out
+
+    base = img.copy()
+    clear = (0, 0, 0, 0) if img.mode == "RGBA" else (0, 0)
+    for (x, y) in used:
+        base.putpixel((x + S, y + S), clear)
+    return base, [only(s) for s in board_px], only(front_px)
+
+
 # ------------------------------------------------------------ 具体设备
 
 WOOD = (122, 90, 58, 255)
@@ -201,9 +226,28 @@ def shop_shelf(front, S=1):
             return lighten(cur, 0.06)          # 侧板凹槽
         return cur
 
-    b.paint_face(front, face_front).paint_face(side, face_side).edge()
+    b.paint_face(front, face_front).paint_face(side, face_side)
+    # 拆层：正面两根立柱是前框；每层层板的前沿（含下面那道阴影）是那一层的层板，顶框是顶板
+    posts, boards = set(), [set() for _ in tiers] + [set()]
+    for y in range(b.img.size[1]):
+        for x in range(b.img.size[0]):
+            f = b.face_px(x, y)
+            if not f or f[0] != front:
+                continue
+            u, v = f[1], f[2]
+            if u < 2 * S or u >= n - 2 * S:
+                posts.add((x, y))
+            elif v >= HS - 2 * S:
+                boards[-1].add((x, y))
+            else:
+                for k, tt in enumerate(tiers):
+                    if (tt - 2) * S <= v <= tt * S:
+                        boards[k].add((x, y))
+    b.edge()
+    base, board_imgs, front_img = split_layers(b, posts, boards)
+    b.img = base
     slot = [0.2, 0.78] if front == "sw" else [0.78, 0.2]
-    return b, {"tiers": tiers, "slot": slot}
+    return b, {"tiers": tiers, "slot": slot, "boards": board_imgs, "front": front_img}
 
 
 def shop_cabinet(front, S=1):
@@ -420,6 +464,20 @@ def warehouse_rack(front, S=1):
         return None
 
     b.paint_face("sw", frame).paint_face("se", lambda u, v, cur: darken(frame(u, v, cur), 0.28) if frame(u, v, cur) else None)
+    # 拆层（见 split_layers）：朝外两面的立柱是前框；每层的横梁和层板顶面是那一层的层板
+    posts, boards = set(), [set() for _ in tiers] + [set()]
+    for y in range(b.img.size[1]):
+        for x in range(b.img.size[0]):
+            f = b.face_px(x, y)
+            if not f or not b.img.getpixel((x, y))[3]:
+                continue
+            u, v = f[1], f[2]
+            if u < 2 * S or u >= b.face_len(f[0]) - 2 * S:
+                posts.add((x, y))
+                continue
+            for k, tt in enumerate(tiers + [H]):
+                if (tt - 2) * S <= v < tt * S:
+                    boards[k].add((x, y))
     # 后面的立柱（透过架子能看到）和每层的层板
     for (x, y0) in [(b.ox, 0), (b.lx, b.ground_h // 2), (b.rx, b.ground_h // 2)]:
         for y in range(y0 + 1, y0 + HS + 1):
@@ -437,9 +495,12 @@ def warehouse_rack(front, S=1):
                         if S >= 2 and t == H and (x + 2 * y) % 8 == 0:
                             c = darken(BOARD, 0.08)                # 顶层板的网格纹
                         b.put(x, yy, c)
+                        boards[(tiers + [H]).index(t)].add((x, yy))
     b.edge()
+    base, board_imgs, front_img = split_layers(b, posts, boards)
+    b.img = base
     slot = [0.08, 0.1] if front == "sw" else [0.1, 0.08]
-    return b, {"tiers": tiers, "slot": slot}
+    return b, {"tiers": tiers, "slot": slot, "boards": board_imgs, "front": front_img}
 
 
 def carton(w=1.0, d=1.0, H=8, S=1):
@@ -555,7 +616,7 @@ def generate(out, S=1):
         img.save(os.path.join(out, name + ".png"))
         m = {"size": list(img.size), "anchor": anchor, "H": H}
         if extra:
-            m.update({k: v for k, v in extra.items() if k != "overlay"})
+            m.update({k: v for k, v in extra.items() if k not in ("overlay", "front", "boards")})
         meta[name] = m
 
     for front in ("sw", "se"):
@@ -565,6 +626,10 @@ def generate(out, S=1):
             save("eq_%s_%s" % (kind, front), b.img, b.anchor(), b.H, extra)
             if "overlay" in extra:
                 save("eq_%s_glass_%s" % (kind, front), extra["overlay"], b.anchor(), b.H)
+            if "front" in extra:
+                save("eq_%s_front_%s" % (kind, front), extra["front"], b.anchor(), b.H)
+            for k, img in enumerate(extra.get("boards", [])):
+                save("eq_%s_board%d_%s" % (kind, k, front), img, b.anchor(), b.H)
         cart, anchor = handcart(front, S)
         save("eq_handcart_%s" % front, cart, anchor, 3 * S)
         cart, anchor = handcart({"sw": "ne", "se": "nw"}[front], S)
@@ -582,6 +647,9 @@ def generate(out, S=1):
     save("eq_carton_small_se", c.img, c.anchor(), c.H)
     bg = bag(S)
     save("eq_bag", bg.img, bg.anchor(), bg.H)
+    # 人抱在身前的小纸箱（比人窄，两只手露在两边）
+    c = carton(0.32, 0.32, 6, S)
+    save("eq_carton_carry", c.img, c.anchor(), c.H)
     if S == 1:
         with open(os.path.join(out, "equipment.json"), "w", encoding="utf-8") as fp:
             json.dump(meta, fp, ensure_ascii=False, indent=1)
