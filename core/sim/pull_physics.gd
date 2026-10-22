@@ -31,13 +31,23 @@ const MIN_FOLLOW := 0.3
 
 
 ## 货跟手的比例（0–1）：上方越重、角度越偏、抓的位置越差越慢，但不低于 MIN_FOLLOW。
-static func follow_ratio(weight_above: float, theta_deg: float, point: String) -> float:
-	return maxf(MIN_FOLLOW, 1.0 / (1.0 + k_w * weight_above) * f_angle(theta_deg) * float(POINT_FACTOR.get(point, 0.4)))
+## kw_mult：整块抽取时块越厚越沉（03 §2.6，block_kw_mult）。
+static func follow_ratio(weight_above: float, theta_deg: float, point: String, kw_mult: float = 1.0) -> float:
+	return maxf(MIN_FOLLOW, 1.0 / (1.0 + k_w * kw_mult * weight_above) * f_angle(theta_deg) * float(POINT_FACTOR.get(point, 0.4)))
 
 
 ## 货物实际跟手速度（小游戏表现层用）。
-static func item_speed(v_hand: float, weight_above: float, theta_deg: float, point: String) -> float:
-	return v_hand * follow_ratio(weight_above, theta_deg, point)
+static func item_speed(v_hand: float, weight_above: float, theta_deg: float, point: String, kw_mult: float = 1.0) -> float:
+	return v_hand * follow_ratio(weight_above, theta_deg, point, kw_mult)
+
+
+## 整块抽取（03 §2.6）：一次抽 n 份，压迫项 k_w ×(1 + 0.25·(n−1))，倒塌系数 α ×(1 + 0.2·(n−1))。
+static func block_kw_mult(n: int) -> float:
+	return 1.0 + 0.25 * maxi(n - 1, 0)
+
+
+static func block_alpha_mult(n: int) -> float:
+	return 1.0 + 0.2 * maxi(n - 1, 0)
 
 
 ## 玩家输入 → 偏差分。input: {angle_deg, point, early_speed, jerk}
@@ -60,15 +70,15 @@ static func deviation_from_actor(profile: Dictionary, rng: GameRng) -> float:
 	return maxf(0.0, base + rng.randfn(0.0, 0.25))
 
 
-static func collapse_probability(d: float, n_above: int) -> float:
+static func collapse_probability(d: float, n_above: int, alpha_mult: float = 1.0) -> float:
 	if n_above <= 0:
 		return 0.0
-	return 1.0 / (1.0 + exp(-(alpha * d + beta * n_above - gamma)))
+	return 1.0 / (1.0 + exp(-(alpha * alpha_mult * d + beta * n_above - gamma)))
 
 
-## 结算一次抽取。返回 {collapsed, displaced, d, p_collapse}。
-static func resolve(d: float, n_above: int, rng: GameRng) -> Dictionary:
-	var p := collapse_probability(d, n_above)
+## 结算一次抽取。返回 {collapsed, displaced, d, p_collapse}。alpha_mult 见 block_alpha_mult。
+static func resolve(d: float, n_above: int, rng: GameRng, alpha_mult: float = 1.0) -> Dictionary:
+	var p := collapse_probability(d, n_above, alpha_mult)
 	var collapsed := rng.chance(p)
 	var displaced := not collapsed and d * n_above * shift_scale > shift_threshold
 	return {"collapsed": collapsed, "displaced": displaced, "d": d, "p_collapse": p}

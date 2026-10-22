@@ -279,3 +279,91 @@ func test_npc_fetch_by_personality() -> void:
 	assert_true(tops >= 15, "谨慎的多数拆顶：%d" % tops)
 	assert_eq(top_collapses, 0)
 	assert_true(pulls >= 15, "马虎的多数直接抽：%d" % pulls)
+
+
+## 一格摊位上依次摆 skus（自底向上），堆高放宽到 8。
+func _table_of(s: GameState, api: ActionAPI, skus: Array) -> Slot:
+	var table: Slot = s.inventory.slots_of_type("StallTable")[0]
+	table.stack.max_height = 8
+	for sku in skus:
+		api.place_on_top(s.inventory.create_item(sku), table.id)
+	return table
+
+
+const _R := "scarf_solid_red_wool"
+const _N := "scarf_solid_navy_wool"
+
+
+func test_batch_take_top_stops_when_hand_is_full() -> void:
+	var s := _state()
+	var api := ActionAPI.new(s)
+	var table := _table_of(s, api, [_R, _R, _N, _N, _R])
+	var top := table.stack.top()
+	var hand := s.inventory.hand()
+	var last := api.take_top_to_hand(table.id, 5)
+	assert_eq(hand.stack.height(), 3, "手上只能拿 3 份")
+	assert_eq(table.stack.height(), 2)
+	assert_eq(hand.stack.items[0].id, top.id, "一份份从顶上拿，最先拿的在手上最下面")
+	assert_eq(last.id, hand.stack.top().id)
+	assert_eq(api.hand_room(), 0)
+	assert_true(api.take_top_to_hand(table.id, 2) == null, "手满了一份都拿不了")
+
+
+func test_pull_block_keeps_order_and_leaves_gap() -> void:
+	var s := _state()
+	var api := ActionAPI.new(s)
+	var table := _table_of(s, api, [_R, _N, _R, _N, _R])
+	var st := table.stack
+	var ids := st.items.map(func(it): return it.id)
+	var hand := s.inventory.hand()
+	assert_true(api.pull_block(table.id, 1, 4, {"resolved": true})["item"] == null, "4 份的块比手上余量 3 大，不能开始")
+	assert_eq(st.height(), 5, "没开始就不动")
+	var r := api.pull_block(table.id, 1, 2, {"resolved": true})
+	assert_eq(r["items"].size(), 2)
+	assert_eq(hand.stack.items.map(func(it): return it.id), [ids[1], ids[2]], "按原顺序进手上")
+	assert_eq(st.items.map(func(it): return it.id), [ids[0], ids[3], ids[4]])
+	assert_eq(st.items[1].gap_below, 2, "下面空出两层")
+	assert_eq(st.layer_of(2), 4)
+	# 手上余量 1：只能再抽 1 份的块
+	assert_true(api.pull_block(table.id, 0, 1, {"resolved": true})["item"] == null)
+
+
+func test_block_is_heavier_and_riskier() -> void:
+	assert_near(PullPhysics.block_kw_mult(1), 1.0)
+	assert_near(PullPhysics.block_kw_mult(3), 1.5)
+	assert_near(PullPhysics.block_alpha_mult(3), 1.4)
+	assert_true(PullPhysics.follow_ratio(3.0, 40.0, "corner", PullPhysics.block_kw_mult(3)) < PullPhysics.follow_ratio(3.0, 40.0, "corner"), "块越厚越沉")
+	assert_true(PullPhysics.collapse_probability(0.8, 2, PullPhysics.block_alpha_mult(3)) > PullPhysics.collapse_probability(0.8, 2), "块越厚越容易塌")
+	# 小游戏一段：整块一起出来，只有块上面的会被带歪 / 会塌
+	var s := _state()
+	var api := ActionAPI.new(s)
+	var table := _table_of(s, api, [_R, _N, _R, _N, _R])
+	var st := table.stack
+	var r := api.pull_segment(table.id, 1, 0.2, 0.3, 0.2, 2)
+	assert_near(float(r["p_collapse"]), PullPhysics.collapse_probability(0.3, 2, 1.2), 0.0001, "按块上面 2 份、α ×1.2 判定")
+	if not r["collapsed"]:
+		assert_near(st.items[1].pull_out, 0.2)
+		assert_near(st.items[2].pull_out, 0.2, 0.0001, "块里的每份一起出来")
+		assert_near(st.items[0].pull_out, 0.0)
+		assert_true(st.items[4].shift > st.items[3].shift and st.items[3].shift > 0.0, "块上面的越往上越歪")
+
+
+func test_peek_range_and_place_from_carrier() -> void:
+	var s := _state()
+	var api := ActionAPI.new(s)
+	var table := _table_of(s, api, [_R, _N, _R])
+	assert_eq(api.peek_range(table.id, 0, 2).size(), 3, "批量翻看逐份看")
+	for it in table.stack.items:
+		assert_true(s.knowledge.perceived.has(it.id))
+	var hand := s.inventory.hand()
+	api.take_top_to_hand(table.id, 3)
+	var order := hand.stack.items.map(func(it): return it.id)
+	var other: Slot = s.inventory.slots_of_type("StallTable")[1]
+	other.stack.max_height = 2
+	assert_eq(api.place_from_carrier(other.id, 3, 0), 2, "放不下的留在手上")
+	assert_eq(other.stack.items.map(func(it): return it.id), [order[0], order[1]], "按原顺序放上去")
+	assert_eq(hand.stack.items.map(func(it): return it.id), [order[2]])
+	var third: Slot = s.inventory.slots_of_type("StallTable")[2]
+	assert_eq(api.place_from_carrier(third.id, 1), 1, "lo < 0：放手上最上面那份")
+	assert_eq(hand.stack.height(), 0)
+

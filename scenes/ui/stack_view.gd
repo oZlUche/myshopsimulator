@@ -3,6 +3,7 @@ extends Control
 ## 画一个槽位的货堆（03 文档）：从正面只看得到每份货的边缘条（颜色），图案要翻看才知道。
 ## 点堆顶那份的顶面（或最上面那份）= 从顶部拿一份；点下面某份的侧面边缘条 = 抽取；
 ## 右键 = 翻看；点空处 = 把手上的货放到这一堆顶上；点地上那堆 = 拾起（03 §2.0）。
+## 按住拖超过 DRAG_START 像素 = 拉框选一段连续的货（03 §2.6），松手发 range_selected；右键拉框 = 批量翻看。
 ## 只读认知层：翻看结果、强化记忆悬浮框；颜色条是"露在外面能看到的颜色"。
 
 signal top_pressed(slot_id: String)
@@ -10,6 +11,8 @@ signal strip_pressed(slot_id: String, index: int)
 signal strip_peek(slot_id: String, index: int)
 signal slot_pressed(slot_id: String)
 signal pile_pressed(slot_id: String)
+## 拉框选中了 [lo, hi]（连续一段）；right = 右键拉的（批量翻看）
+signal range_selected(slot_id: String, lo: int, hi: int, right: bool)
 
 const STRIP_H := 14
 const PILE_H := 22
@@ -17,6 +20,8 @@ const PILE_H := 22
 const TOP_H := 6
 ## 抽出 / 带歪的位移在小格子里按比例缩小画，免得画出格子
 const SHOW_SCALE := 0.3
+## 按下后拖过这么多像素才算拉框，不到就是单击
+const DRAG_START := 6.0
 
 var slot: Slot
 var title: String = ""
@@ -25,6 +30,14 @@ var selected_index: int = -1
 var highlight_item_id: String = ""
 var _hover_index := -1
 var _hover_top := false
+## 手上框选好、等着一起放下的那段（由场景设置，-1 = 没有）
+var sel_lo := -1
+var sel_hi := -1
+## 拉框：按下的位置、哪个键、拖到哪了、是不是已经在拉框
+var _press_pos := Vector2.ZERO
+var _press_button := 0
+var _drag_now := Vector2.ZERO
+var _dragging := false
 
 
 func setup(sl: Slot, t: String) -> StackView:
@@ -81,7 +94,7 @@ func _draw() -> void:
 			var pat: String = DataDB.attributes()["patterns"][DataDB.sku(guess)["pattern"]]["name"]
 			var mark := pat + ("?" if k.perceived[it.id]["may_be_wrong"] else "")
 			draw_string(get_theme_default_font(), r.position + Vector2(4, 11), mark, HORIZONTAL_ALIGNMENT_LEFT, r.size.x - 8, 11, _ink(UIKit.sku_color(it.sku_id)))
-		if i == selected_index:
+		if i == selected_index or (i >= sel_lo and i <= sel_hi) or (_dragging and _in_drag(i)):
 			draw_rect(r.grow(1), UIKit.ACCENT, false, 2.0)
 		elif it.id == highlight_item_id:
 			draw_rect(r.grow(1), Color.WHITE, false, 2.0)
@@ -103,6 +116,16 @@ func _draw() -> void:
 			var rr := Rect2(pr.position + Vector2(6 + j * 11, 4 + (j % 3) * 4), Vector2(18, 8))
 			draw_rect(rr, UIKit.sku_color(it.sku_id))
 		draw_string(get_theme_default_font(), pr.position + Vector2(pr.size.x - 70, 16), "地上 %d 份" % pile, HORIZONTAL_ALIGNMENT_RIGHT, 66, 12, UIKit.BAD)
+	if _dragging:
+		var box := _drag_rect()
+		draw_rect(box, Color(UIKit.ACCENT, 0.15))
+		draw_rect(box, UIKit.ACCENT, false, 1.0)
+		var font := get_theme_default_font()
+		var label := _drag_label()
+		var at := _drag_now + Vector2(12, -8)
+		var tw := font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x
+		draw_rect(Rect2(at + Vector2(-4, -13), Vector2(tw + 8, 18)), Color(UIKit.PANEL, 0.92))
+		draw_string(font, at, label, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, UIKit.TEXT)
 
 
 func _ink(bg: Color) -> Color:
@@ -120,6 +143,16 @@ func _gui_input(e: InputEvent) -> void:
 	if slot == null:
 		return
 	if e is InputEventMouseMotion:
+		if _press_button != 0:
+			_drag_now = e.position
+			if not _dragging and e.position.distance_to(_press_pos) > DRAG_START:
+				_dragging = true
+				# 拉框的提示字会超出这一格，提到旁边几格上面画
+				z_index = 1
+			if _dragging:
+				queue_redraw()
+				accept_event()
+				return
 		var h := _index_at(e.position)
 		var ht := _top_rect().grow(1).has_point(e.position)
 		if h != _hover_index or ht != _hover_top:
@@ -127,21 +160,85 @@ func _gui_input(e: InputEvent) -> void:
 			_hover_top = ht
 			_update_tooltip()
 			queue_redraw()
-	elif e is InputEventMouseButton and e.pressed:
-		var i := _index_at(e.position)
-		var on_top := _top_rect().grow(1).has_point(e.position)
-		if _pile_rect().has_point(e.position) and not slot.stack.collapsed_pile.is_empty():
-			pile_pressed.emit(slot.id)
-		elif i >= 0 and e.button_index == MOUSE_BUTTON_RIGHT:
-			strip_peek.emit(slot.id, i)
-		elif e.button_index == MOUSE_BUTTON_LEFT and (on_top or (i >= 0 and i == slot.stack.height() - 1)):
-			# 堆顶那份：点顶面和点侧面一样，直接拿
-			top_pressed.emit(slot.id)
-		elif i >= 0 and e.button_index == MOUSE_BUTTON_LEFT:
-			strip_pressed.emit(slot.id, i)
-		elif e.button_index == MOUSE_BUTTON_LEFT:
-			slot_pressed.emit(slot.id)
+	elif e is InputEventMouseButton and e.button_index in [MOUSE_BUTTON_LEFT, MOUSE_BUTTON_RIGHT]:
+		if e.pressed:
+			_press_pos = e.position
+			_drag_now = e.position
+			_press_button = e.button_index
+			_dragging = false
+		elif e.button_index == _press_button:
+			var was_drag := _dragging
+			_press_button = 0
+			_dragging = false
+			z_index = 0
+			queue_redraw()
+			if was_drag:
+				var r := drag_range(_press_pos, e.position)
+				if not r.is_empty():
+					range_selected.emit(slot.id, r[0], r[1], e.button_index == MOUSE_BUTTON_RIGHT)
+			else:
+				click(_press_pos, e.button_index)
 		accept_event()
+
+
+## 拉框时按 Esc 取消。
+func _input(e: InputEvent) -> void:
+	if _dragging and e is InputEventKey and e.pressed and e.keycode == KEY_ESCAPE:
+		_dragging = false
+		_press_button = 0
+		z_index = 0
+		queue_redraw()
+		get_viewport().set_input_as_handled()
+
+
+## 单击（按下和松开之间没拖动）：按点到的位置分派。
+func click(p: Vector2, button: int) -> void:
+	var i := _index_at(p)
+	var on_top := _top_rect().grow(1).has_point(p)
+	if _pile_rect().has_point(p) and not slot.stack.collapsed_pile.is_empty():
+		pile_pressed.emit(slot.id)
+	elif i >= 0 and button == MOUSE_BUTTON_RIGHT:
+		strip_peek.emit(slot.id, i)
+	elif button == MOUSE_BUTTON_LEFT and (on_top or (i >= 0 and i == slot.stack.height() - 1)):
+		# 堆顶那份：点顶面和点侧面一样，直接拿
+		top_pressed.emit(slot.id)
+	elif i >= 0 and button == MOUSE_BUTTON_LEFT:
+		strip_pressed.emit(slot.id, i)
+	elif button == MOUSE_BUTTON_LEFT:
+		slot_pressed.emit(slot.id)
+
+
+func _drag_rect() -> Rect2:
+	return Rect2(_press_pos, Vector2.ZERO).expand(_drag_now)
+
+
+## 框与哪些边缘条相交：取最低到最高那一段（中间漏框的也算，越不过去）。框拖出堆外按本堆算。
+## 返回 [lo, hi]，一份都没框到返回空数组。
+func drag_range(a: Vector2, b: Vector2) -> Array:
+	var box := Rect2(a, Vector2.ZERO).expand(b)
+	box = Rect2(Vector2(0, box.position.y), Vector2(size.x, box.size.y))
+	var lo := -1
+	var hi := -1
+	for i in slot.stack.height():
+		if _item_rect(i).intersects(box, true):
+			lo = i if lo < 0 else lo
+			hi = i
+	return [] if lo < 0 else [lo, hi]
+
+
+func _in_drag(i: int) -> bool:
+	var r := drag_range(_press_pos, _drag_now)
+	return not r.is_empty() and i >= r[0] and i <= r[1]
+
+
+func _drag_label() -> String:
+	var r := drag_range(_press_pos, _drag_now)
+	var n: int = 0 if r.is_empty() else int(r[1]) - int(r[0]) + 1
+	if _press_button == MOUSE_BUTTON_RIGHT:
+		return "翻看 %d 份" % n
+	if slot.type == "Hand" or Game.state == null:
+		return "选中 %d 份" % n
+	return "选中 %d 份 · 手上还能拿 %d" % [n, ActionAPI.new(Game.state).hand_room()]
 
 
 ## 强化记忆悬浮框：有记忆的槽位直接显示文本，无需翻看、不会认错（02 §2.2）。
@@ -156,6 +253,7 @@ func _update_tooltip() -> void:
 	if label != "":
 		lines.append("标签：" + label)
 	lines.append("点顶面：从顶部拿一份（不会塌） / 点侧面：从中间抽 / 右键翻看 / 点空处：把手上的货放到堆顶")
+	lines.append("按住拉框：选一段一起拿（含堆顶 = 一份份拆，不含 = 整块抽） / 右键拉框：一起翻看")
 	tooltip_text = "\n".join(lines)
 
 

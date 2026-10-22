@@ -32,6 +32,29 @@ func good_pull(st, take_shot := false, max_steps := 200):
 
 func scene():
 	return current_scene
+## 找某格的货堆面板。
+func view_of(box, sl):
+	for c in box.get_children():
+		if c.has_method("drag_range") and c.slot == sl:
+			return c
+	return null
+## 在货堆面板上按住左键从 a 拖到 b 再松手（拉框，03 §2.6）。给了 shot_name 就在松手前截一张拉框中的图。
+func drag(v, a, b, shot_name := ""):
+	var press = InputEventMouseButton.new()
+	press.button_index = MOUSE_BUTTON_LEFT
+	press.pressed = true
+	press.position = a
+	v._gui_input(press)
+	var move = InputEventMouseMotion.new()
+	move.position = b
+	v._gui_input(move)
+	if shot_name != "":
+		await shot(shot_name)
+	var up = InputEventMouseButton.new()
+	up.button_index = MOUSE_BUTTON_LEFT
+	up.pressed = false
+	up.position = b
+	v._gui_input(up)
 func _init() -> void:
 	await process_frame
 	G = root.get_node("Game")
@@ -76,6 +99,28 @@ func _init() -> void:
 	while hand.stack.height() > 0:
 		st._on_slot(tables[1].id)
 	assert(tables[1].stack.height() == h0)
+	# 框选（03 §2.6）：在第 2 格上从最底下拉到最上面 → 一份份拆下来；手上拉框全选 → 点格空处一起放回
+	await process_frame
+	var v1 = view_of(st._table_box, tables[1])
+	await drag(v1, v1._item_rect(0).get_center(), v1._item_rect(h0 - 1).get_center(), "3a1_marquee")
+	assert(st._minigame == null and hand.stack.height() == mini(h0, 3), "框到堆顶：一份份拆，不开小游戏")
+	await process_frame
+	var hv = view_of(st._bag_box, hand)
+	await drag(hv, hv._item_rect(0).get_center(), hv._item_rect(hand.stack.height() - 1).get_center())
+	assert(st._hand_pick == [0, hand.stack.height() - 1], "手上框选好了")
+	await shot("3a2_hand_pick")
+	st._on_slot(tables[1].id)
+	assert(hand.stack.height() == 0 and tables[1].stack.height() == h0, "一起放回去")
+	# 不含堆顶 → 整块抽（小游戏），两份一起进手上
+	if h0 >= 3:
+		await process_frame
+		v1 = view_of(st._table_box, tables[1])
+		await drag(v1, v1._item_rect(0).get_center(), v1._item_rect(1).get_center())
+		assert(st._minigame != null and st._minigame.hi == 1, "不含堆顶应弹出整块抽取")
+		await good_pull(st)
+		assert(st._minigame == null and hand.stack.height() == 2, "整块两份一起进手上")
+		while hand.stack.height() > 0:
+			st._on_slot(tables[1].id)
 	# 抽取小游戏：点第 1 格最底下那份的侧面，抽到手上，再放到第 3 格
 	var before = tables[0].stack.height()
 	st._on_strip(tables[0].id, 0)

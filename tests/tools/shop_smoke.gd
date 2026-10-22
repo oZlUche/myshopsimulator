@@ -17,6 +17,28 @@ func scene():
 	return current_scene
 
 
+## 找某格的货堆面板（不写 StackView 类型：它引用自动加载 Game，脚本解析时还没有）。
+func view_of(box, sl):
+	for c in box.get_children():
+		if c.has_method("drag_range") and c.slot == sl:
+			return c
+	return null
+
+
+## 在货堆面板上按住左键从 a 拖到 b 再松手（拉框）。
+func drag(v, a, b):
+	for ev in [[true, a], [null, b], [false, b]]:
+		var e
+		if ev[0] == null:
+			e = InputEventMouseMotion.new()
+		else:
+			e = InputEventMouseButton.new()
+			e.button_index = MOUSE_BUTTON_LEFT
+			e.pressed = ev[0]
+		e.position = ev[1]
+		v._gui_input(e)
+
+
 func wait_scene(name):
 	for i in 30:
 		await process_frame
@@ -76,6 +98,27 @@ func _init() -> void:
 	assert(s.clock.time_of_period == 0.0, "开门前干活不花时间")
 	assert(not sh.session.table_empty(), "货架上有货了")
 	await shot("s4_shop_stocked")
+	# 框选在店里也能用（03 §2.6）：货架上框住最上面两份 → 一份份拆到手上；手上全选 → 点货架空处一起放回
+	var shelf = null
+	for d2 in displays:
+		if d2.stack.height() >= 2:
+			shelf = d2
+			break
+	if shelf != null:
+		var e2 = s.inventory.equipment[shelf.equipment_id]
+		sh._on_cell(Vector2i(int(e2["pos"][0]), int(e2["pos"][1])))
+		await process_frame
+		var sv = view_of(sh._closeup, shelf)
+		var hs = shelf.stack.height()
+		drag(sv, sv._item_rect(hs - 2).get_center(), sv._item_rect(hs - 1).get_center())
+		assert(s.inventory.hand().stack.height() == 2 and shelf.stack.height() == hs - 2, "店里框选拆顶两份")
+		await process_frame
+		var hv = view_of(sh._carry, s.inventory.hand())
+		drag(hv, hv._item_rect(0).get_center(), hv._item_rect(1).get_center())
+		assert(sh._hand_pick == [0, 1])
+		sh._on_slot(shelf.id)
+		assert(s.inventory.hand().stack.height() == 0 and shelf.stack.height() == hs, "一起放回货架")
+	assert(s.clock.time_of_period == 0.0, "开门前框选也不花时间")
 
 	# ---------- 仓库：搬箱、拆箱、装车 ----------
 	sh._go_warehouse()
