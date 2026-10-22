@@ -7,6 +7,8 @@ const PERIODS_PER_SEASON := 9
 const PERIODS_PER_YEAR := 36
 const SEASON_IDS := ["spring", "summer", "autumn", "winter"]
 const SEASON_NAMES := ["春", "夏", "秋", "冬"]
+## 新游戏从第 1 年 2 月上旬（开春集）开局，避开年初清淡（01 §3.0、09 §1.8）；第 1 年只有 33 旬
+const START_PERIOD := 4
 
 var period: int = 1
 ## 旬内时间进度 0..1（只在营业 / 开车 / 仓库作业时推进）。

@@ -44,6 +44,7 @@ static func new_game(seed_value: int) -> GameState:
 	var s := GameState.new()
 	s.rng = GameRng.new(seed_value)
 	s.meta = {"seed": str(seed_value), "created_with": GAME_VERSION}
+	s.clock.period = Clock.START_PERIOD
 	s.inventory.add_location("player", "Carry")
 	s.inventory.add_location("stall", "Stall", 2.0)
 	s.inventory.install_equipment("bag_basic", "player")

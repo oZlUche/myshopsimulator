@@ -55,7 +55,7 @@ const CREDIT_RISK_G := 1.5
 ## 节拍层 B（09 §1.8）：季节需求 · 日历事件 · 突发天气，固定部分年均归一到 1，只乘客流和购物意向
 const SEASON_D_AMP := 0.35
 const SEASON_D_PEAK := 32
-const B_MIN := 0.6
+const B_MIN := 0.4
 const B_MAX := 1.6
 ## 日历事件（按年内旬号 q = 1..36）：{name, q: {q: [客流倍率, 意向加成]}}；集市日另算（每月下旬）
 const CALENDAR := [
@@ -68,9 +68,9 @@ const CALENDAR := [
 const MARKET_DAY := [1.15, 0.0]
 ## 突发天气：触发的年内旬号范围、每旬概率、客流倍率、意向加成、持续旬数（线性衰减到 1）；indoor = 店里受影响的比例
 const WEATHER := {
-	"cold": {"name": "突然降温", "tip": "突然冷了，来买围巾的人多", "tip_later": "还冷着，来买围巾的人还多", "q": [[19, 36], [1, 3]], "p": 0.10, "mult": 1.3, "intent": 0.1, "duration": 2, "indoor": 1.0},
+	"cold": {"name": "突然降温", "tip": "突然冷了，来买围巾的人多", "tip_later": "还冷着，来买围巾的人还多", "q": [[19, 36], [1, 3]], "p": 0.08, "mult": 1.3, "intent": 0.1, "duration": 2, "indoor": 1.0},
 	"warm": {"name": "冬天回暖", "tip": "回暖了，没什么人想买围巾", "tip_later": "还暖和着，买围巾的人少", "q": [[28, 36]], "p": 0.06, "mult": 0.85, "intent": 0.0, "duration": 2, "indoor": 1.0},
-	"rain": {"name": "连着下雨", "tip": "连着下雨，街上人少（店里好一点）", "q": [[10, 18]], "p": 0.12, "mult": 0.75, "intent": 0.0, "duration": 1, "indoor": 0.5},
+	"rain": {"name": "连着下雨", "tip": "连着下雨，街上人少（店里好一点）", "q": [[10, 18]], "p": 0.15, "mult": 0.75, "intent": 0.0, "duration": 1, "indoor": 0.5},
 	"sand": {"name": "大风沙", "tip": "刮大风沙，出门的人少，出来的更想买", "q": [[1, 9]], "p": 0.05, "mult": 0.8, "intent": 0.05, "duration": 1, "indoor": 1.0},
 }
 ## 年关抢购从年内第 34 旬（12 月上旬）开始
@@ -246,7 +246,7 @@ static var _rhythm_norm := 0.0
 
 
 ## 归一化 Z（只算一次）：让夹限后的固定部分 clamp(季节需求 × 日历 / Z) 一年 36 旬均值正好 1。
-## 不夹限的均值是 1.119，但年关最后两旬会顶到 1.6，直接除会让年均掉到 0.985，所以二分找 Z（≈ 1.099）。
+## 不夹限的均值是 1.119，但年关最后两旬会顶到 1.6，直接除会让年均掉到 0.98，所以二分找 Z（≈ 1.099）。
 static func rhythm_norm() -> float:
 	if _rhythm_norm <= 0.0:
 		var lo := 0.5

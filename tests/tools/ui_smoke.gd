@@ -227,6 +227,6 @@ func _init() -> void:
 		st._process(1.0)
 	for i in 8: await process_frame
 	await shot("7_settlement")
-	var ok = s.clock.period == 2 and current_scene.name == "Settlement" and G.last_report.get("sold_out", false)
+	var ok = s.clock.period == Clock.START_PERIOD + 1 and current_scene.name == "Settlement" and G.last_report.get("sold_out", false)
 	print("UI_SMOKE ", "PASS" if ok else "FAIL", " period=", s.clock.period, " sold_out=", G.last_report.get("sold_out", false))
 	quit(0 if ok else 1)
