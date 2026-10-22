@@ -14,7 +14,8 @@ var access_cost: float = 1.0
 ## 提供该槽位的设备实例 ID（无则为空）。
 var equipment_id: String = ""
 var stack := ItemStack.new()
-## 整箱、整包（07 §1）：下标 0 在最下面，只能动最上面那个。一个槽位里散货和整包不混放。
+## 整箱、整包（07 §1）：下标 0 在最下面，只能动最上面那个。一个槽位里散货和整包不混放，
+## 手推车除外：车板上放箱包，车上另有一个散货篓（stack），两样可以同时有（07 §2.1，见 mixes()）。
 var packages: Array[Package] = []
 ## 能放多少整箱整包（按 Package.UNITS 计，箱 3、包 1）；0 = 不放整包
 var pkg_capacity: int = 0
@@ -34,9 +35,16 @@ func top_package() -> Package:
 	return null if packages.is_empty() else packages[-1]
 
 
-## 这个包 / 箱能不能放上来：容量够，而且这里没有散货。
+## 箱包和散货能不能同时放：只有手推车可以（车板 + 散货篓）。
+func mixes() -> bool:
+	return type == "Cart"
+
+
+## 这个包 / 箱能不能放上来：容量够，而且这里没有散货（手推车不管散货篓）。
 func can_hold(p: Package) -> bool:
-	if pkg_capacity <= 0 or stack.height() > 0 or not stack.collapsed_pile.is_empty():
+	if pkg_capacity <= 0:
+		return false
+	if not mixes() and (stack.height() > 0 or not stack.collapsed_pile.is_empty()):
 		return false
 	if not kind_limits.is_empty():
 		for q in packages:

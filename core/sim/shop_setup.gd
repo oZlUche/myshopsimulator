@@ -32,7 +32,7 @@ static func rent_contract(s: GameState, rent_per_m2_real: float) -> Dictionary:
 		"start_period": s.clock.period, "end_period": s.clock.period + RENT_TERM - 1}
 
 
-## 预览开局（07 §5）：现金、两个货架、一个货柜、一个橱窗、两个仓库货架、手推车；
+## 预览开局（07 §5）：现金、两个货架、一个货柜、一个橱窗、两个仓库货架、手推车（停在仓库）；
 ## 卸货区 6 箱货，店里货柜里先放 3 包让你马上能上架。
 static func start_preview(s: GameState) -> void:
 	s.player.phase = "shop"
@@ -61,6 +61,10 @@ static func start_preview(s: GameState) -> void:
 	last.sealed = false
 	for b in boxes:
 		b.waybill["weight"] = Wholesale.box_weight(b)
+	# 手推车停在仓库门口旁边（07 §2.1），开局要搬的箱子都在仓库
+	s.player.pushing_cart = false
+	s.player.cart_room = WAREHOUSE
+	s.player.cart_cell = RoomGrid.nearest_parking(inv, WAREHOUSE, inv.room_cell(WAREHOUSE, "door"))
 	for it in inv.all_items():
 		if not s.stall["prices"].has(it.sku_id):
 			s.stall["prices"][it.sku_id] = s.list_price(it.sku_id)

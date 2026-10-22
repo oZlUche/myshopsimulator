@@ -22,16 +22,20 @@ func _ready() -> void:
 	api = ActionAPI.new(s)
 	_build()
 	ops = RoomOps.new(s, ShopSetup.WAREHOUSE, _view, self, _say, _spend, _refresh)
+	ops.ensure_cart()
 	var door := s.inventory.room_cell(ShopSetup.WAREHOUSE, "door")
 	ops.player_cell = door
 	_view.place_player(door)
 	_view.cell_clicked.connect(_on_cell)
 	if Game.arrive_from == "shop":
-		_say("推着车到了仓库。")
+		_say("推着车到了仓库。" if s.player.pushing_cart else "到仓库了。")
 	else:
 		_say("到仓库了。托运部把货卸在门口的黄框里。箱子外面只看得到物流单，拆开才知道里面是什么。")
 	_say("点一堆箱子走过去，点最上面那箱：抱起来、拆箱、拿一包出来、写标签。抱着东西点别的格子空处就放下。")
-	_say("手推车停在门口，一次装 2 箱（或 6 包），推去店里路上 %d 秒。" % int(ShopSetup.TRIP_SECONDS))
+	if ops.cart_here():
+		_say("点手推车把它推起来：推着车时抱起的箱包直接放车上（一车 2 箱或 6 包，另有散货篓 %d 条），推去店里路上 %d 秒。" % [Inventory.CART_BASKET, int(ShopSetup.TRIP_SECONDS)])
+	elif ops.cart() != null:
+		_say("手推车停在店里。")
 	if _day_over():
 		_say("天已经黑了，回家吧。")
 	_refresh()
@@ -139,8 +143,7 @@ func _refresh() -> void:
 	_layout_button.text = "摆好了" if ops.layout_mode else "摆货架"
 	ops.closeup(_closeup)
 	ops.carry(_carry)
-	_view.cart_slot = ops.cart()
-	_view.cart_g = ops.cart_foot() if ops.cart() != null else Vector2(-99, -99)
+	_shop_button.text = "推车去店里 →" if s.player.pushing_cart else "去店里 →"
 	_view.marks = []
 	if ops.layout_mode:
 		ops.layout_panel(_layout_box, _toggle_layout)
@@ -164,7 +167,7 @@ func _on_slot(slot_id: String) -> void:
 		_say("天黑了，回家吧。")
 		return
 	if not ops.put_from_hand(slot_id):
-		if s.inventory.hand().stack.height() > 0:
+		if api.carrier().stack.height() > 0:
 			_say("仓库里只放箱和包，散货拿回店里放。")
 		else:
 			_say("手上是空的。点最上面那箱 / 那包，抱起来再放到别处。")
@@ -184,12 +187,16 @@ func _go_shop() -> void:
 	if ops.layout_mode:
 		_toggle_layout()
 	ShopSession.pass_time(s, ShopSetup.TRIP_SECONDS)
+	if s.player.pushing_cart:
+		s.player.cart_room = ShopSetup.SHOP
 	s.inventory.prune_empty_floors(ShopSetup.WAREHOUSE)
 	Game.arrive_from = "warehouse"
 	Game.goto("shop")
 
 
 func _go_home() -> void:
+	if s.player.pushing_cart:
+		ops.park_cart(true)
 	s.inventory.prune_empty_floors(ShopSetup.WAREHOUSE)
 	set_process(false)
 	Game.end_period({"shop": true})
