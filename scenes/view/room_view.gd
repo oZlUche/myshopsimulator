@@ -3,9 +3,15 @@ extends Control
 ## 店面、仓库的全景（07 §3、§4）：开罗式斜 45° 的一间屋子，后面两堵墙，前面临街敞开。
 ## 画地面格、设备（货架、货柜、橱窗、模特、收银台、仓库货架）、地堆的箱子和包、玩家与客人。
 ## 设备、纸箱、整包、手推车用美术线程的像素图；设备正面看得到每格货露出的边缘颜色（和近景面板一致），箱子只看得到纸箱。
-## 点设备或地面 → cell_clicked；纯表现，规则都在核心层。
+## 点设备或地面 → cell_clicked（松手时）；按住拖过 DRAG_START 像素 = 在地上拉框选一片格子 → cells_selected（07 §2.1）。
+## 纯表现，规则都在核心层。
 
 signal cell_clicked(cell: Vector2i)
+## 拉框选中的格子（屋里的，按行列排好）
+signal cells_selected(cells: Array)
+
+## 按下后拖过这么多像素才算拉框，不到就是单击（同 StackView）
+const DRAG_START := 6.0
 
 const WALL_H := 96.0
 ## 临街那一侧多画几排街面（店面）
@@ -38,6 +44,11 @@ var placing_def := ""
 var placing_ok := false
 ## 挪设备时它自己那格不算占着
 var placing_ignore := ""
+## 拉框：按下的位置、拖到哪了、是不是已经在拉框
+var _press_pos := Vector2.ZERO
+var _pressed := false
+var _drag_now := Vector2.ZERO
+var _dragging := false
 
 
 func setup(inventory: Inventory, location_id: String) -> RoomView:
@@ -139,17 +150,72 @@ func _gui_input(e: InputEvent) -> void:
 	if inv == null:
 		return
 	if e is InputEventMouseMotion:
+		if _pressed:
+			_drag_now = e.position
+			if not _dragging and e.position.distance_to(_press_pos) > DRAG_START:
+				_dragging = true
+			if _dragging:
+				queue_redraw()
+				accept_event()
+				return
 		var c := cell_at(e.position) if placing_def != "" else pick_cell(e.position)
 		if c != hover_cell:
 			hover_cell = c
 			if placing_def != "":
 				placing_ok = RoomGrid.can_place(inv, loc, placing_def, c, placing_ignore) == ""
 			queue_redraw()
-	elif e is InputEventMouseButton and e.pressed and e.button_index == MOUSE_BUTTON_LEFT:
-		var c := cell_at(e.position) if placing_def != "" else pick_cell(e.position)
-		if RoomGrid.in_room(inv, loc, c):
-			cell_clicked.emit(c)
+	elif e is InputEventMouseButton and e.button_index == MOUSE_BUTTON_LEFT:
+		if e.pressed and placing_def != "":
+			# 摆设备时按下就摆，不拉框
+			var pc := cell_at(e.position)
+			if RoomGrid.in_room(inv, loc, pc):
+				cell_clicked.emit(pc)
+				accept_event()
+		elif e.pressed:
+			_pressed = true
+			_dragging = false
+			_press_pos = e.position
+			_drag_now = e.position
 			accept_event()
+		elif _pressed:
+			_pressed = false
+			var was_drag := _dragging
+			_dragging = false
+			queue_redraw()
+			if was_drag:
+				var cells := drag_cells(_press_pos, e.position)
+				if not cells.is_empty():
+					cells_selected.emit(cells)
+			else:
+				var c := pick_cell(_press_pos)
+				if RoomGrid.in_room(inv, loc, c):
+					cell_clicked.emit(c)
+			accept_event()
+
+
+## 拉框时按 Esc 取消。
+func _input(e: InputEvent) -> void:
+	if _dragging and e is InputEventKey and e.pressed and e.keycode == KEY_ESCAPE:
+		_dragging = false
+		_pressed = false
+		queue_redraw()
+		get_viewport().set_input_as_handled()
+
+
+## 从 a 拖到 b（屏幕坐标）框住的地面格：两头所在格围成的矩形，夹在屋里。
+func drag_cells(a: Vector2, b: Vector2) -> Array:
+	var ca := cell_at(a)
+	var cb := cell_at(b)
+	var sz := room()
+	var lo := Vector2i(clampi(mini(ca.x, cb.x), 0, sz.x - 1), clampi(mini(ca.y, cb.y), 0, sz.y - 1))
+	var hi := Vector2i(clampi(maxi(ca.x, cb.x), 0, sz.x - 1), clampi(maxi(ca.y, cb.y), 0, sz.y - 1))
+	var out: Array = []
+	if maxi(ca.x, cb.x) < 0 or maxi(ca.y, cb.y) < 0 or mini(ca.x, cb.x) >= sz.x or mini(ca.y, cb.y) >= sz.y:
+		return out
+	for y in range(lo.y, hi.y + 1):
+		for x in range(lo.x, hi.x + 1):
+			out.append(Vector2i(x, y))
+	return out
 
 
 ## 玩家直接站到某格（进场、换场景时）。
@@ -300,6 +366,12 @@ func _draw_ground_frames(o: Vector2) -> void:
 		var pts := Iso.tile_points(Vector2(selected_cell), o)
 		pts.append(pts[0])
 		draw_polyline(pts, UIKit.ACCENT, 2.0)
+	if _dragging:
+		for c in drag_cells(_press_pos, _drag_now):
+			var dp := Iso.tile_points(Vector2(c), o)
+			draw_colored_polygon(dp, Color(UIKit.ACCENT, 0.18))
+			dp.append(dp[0])
+			draw_polyline(dp, UIKit.ACCENT, 1.5)
 	if RoomGrid.in_room(inv, loc, hover_cell):
 		var col := Color(1, 1, 1, 0.6)
 		if placing_def != "":

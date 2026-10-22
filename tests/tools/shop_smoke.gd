@@ -150,6 +150,44 @@ func _init() -> void:
 	wh._on_slot(rack.id)
 	assert(rack.packages.size() == 1 and cart.packages.size() == 1, "从车上卸到仓库货架上")
 	await shot("s5b_warehouse_pushing")
+	# 地上拉框（07 §2.1）：推着车框住卸货区两格 → 一格格走过去往车上装，装满为止；再框住空地 → 一格格卸下去
+	var units0 = cart.package_units()
+	var grabbed = ops.marquee([Vector2i(2, 4), Vector2i(3, 4)])
+	assert(grabbed >= 1 and cart.package_units() == cart.pkg_capacity, "框选装满一车：%d 件，%d 单位" % [grabbed, cart.package_units()])
+	# 全景上按住拖：从 (4,1) 拖到 (5,2) 框住 4 格，松手发 cells_selected
+	var got = []
+	wh._view.cells_selected.connect(func(cs): got.append_array(cs), CONNECT_ONE_SHOT)
+	wh._view.cells_selected.disconnect(wh._on_cells)
+	var a = wh._view.screen_of(Vector2(4.5, 1.5))
+	var b = wh._view.screen_of(Vector2(5.5, 2.5))
+	for ev in [[true, a], [null, b], [false, b]]:
+		var e
+		if ev[0] == null:
+			e = InputEventMouseMotion.new()
+		else:
+			e = InputEventMouseButton.new()
+			e.button_index = MOUSE_BUTTON_LEFT
+			e.pressed = ev[0]
+		e.position = ev[1]
+		wh._view._gui_input(e)
+	wh._view.cells_selected.connect(wh._on_cells)
+	# 不拖动就是单击：松手时点到那格
+	for pressed in [true, false]:
+		var e = InputEventMouseButton.new()
+		e.button_index = MOUSE_BUTTON_LEFT
+		e.pressed = pressed
+		e.position = wh._view.screen_of(Vector2(4.5, 3.5))
+		wh._view._gui_input(e)
+	assert(ops.focus == Vector2i(4, 3), "单击走到那格：%s" % [ops.focus])
+	assert(got == [Vector2i(4, 1), Vector2i(5, 1), Vector2i(4, 2), Vector2i(5, 2)], "拉框选中 4 格：%s" % [got])
+	var dropped = ops.marquee(got)
+	assert(dropped == grabbed + 1 and cart.packages.is_empty(), "框选空地把车上的箱一件件卸下：%d" % dropped)
+	await shot("s5c_warehouse_marquee")
+	# 再框回车上（满车 2 箱），放一箱回卸货区，车上剩一箱，后面的步骤照旧
+	assert(ops.marquee([Vector2i(4, 1), Vector2i(4, 2), Vector2i(5, 1), Vector2i(5, 2)]) == 2)
+	wh._on_cell(Vector2i(2, 4))
+	wh._on_slot(unload.id)
+	assert(cart.package_units() == units0, "车上剩一箱")
 	# 拆一箱，看看箱里，拿两包（推着车 → 进车），写标签
 	var other = s.inventory.floor_slot("warehouse", Vector2i(3, 4))
 	wh._on_cell(Vector2i(3, 4))
